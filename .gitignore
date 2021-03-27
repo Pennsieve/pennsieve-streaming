@@ -1,0 +1,36 @@
+### Scala ###
+*.class
+*.log
+
+# sbt specific
+.cache/
+.history/
+.lib/
+dist/*
+target/
+lib_managed/
+src_managed/
+project/boot/
+project/plugins/project/
+
+# bloop specific
+.bloop/
+
+# Scala-IDE specific
+.scala_dependencies
+.worksheet
+.idea/
+
+## Redis ##
+*.rdb
+
+## intellij ##
+*.iml
+
+## metals ##
+.metals/
+
+## Ensime##
+.ensime
+.ensime_cache/
+ensime.sbt
