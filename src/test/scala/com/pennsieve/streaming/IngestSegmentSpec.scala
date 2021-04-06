@@ -5,6 +5,7 @@ package com.pennsieve.streaming
 
 import org.scalatest.FlatSpec
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
+import com.blackfynn.streaming.{ IngestSegment, Segment }
 
 /**
   * Created by jsnavely on 2/9/17.

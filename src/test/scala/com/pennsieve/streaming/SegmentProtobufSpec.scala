@@ -6,6 +6,7 @@ package com.pennsieve.streaming
 import java.io.ByteArrayOutputStream
 import org.joda.time.DateTime
 import org.scalatest.FlatSpec
+import com.blackfynn.streaming.{ Segment, TimeSeriesMessage }
 
 /**
   * Created by jsnavely on 9/28/16.

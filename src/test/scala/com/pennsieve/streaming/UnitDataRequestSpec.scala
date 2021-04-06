@@ -1,6 +1,7 @@
 package com.pennsieve.streaming
 
 import akka.stream.scaladsl.{ Sink, Source }
+import com.blackfynn.streaming.UnitRangeEntry
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.chunker.PredicateStreamChunker
 import com.pennsieve.streaming.query.{

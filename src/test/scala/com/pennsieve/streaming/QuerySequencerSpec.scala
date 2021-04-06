@@ -12,6 +12,8 @@ import com.pennsieve.streaming.query.{
   RangeRequest,
   UnitRangeRequest
 }
+import com.blackfynn.streaming.{ LookupResultRow, RangeLookUp, UnitRangeEntry, UnitRangeLookUp }
+
 import scalikejdbc.DBSession
 import com.pennsieve.streaming.server.TestWebServerPorts
 import org.scalatest.Matchers

@@ -18,6 +18,7 @@ import org.scalatest.fixture.FlatSpec
 import scala.collection.mutable
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import com.blackfynn.streaming.{ RangeLookUp, TimeSeriesMessage }
 
 /**
   * Created by jsnavely on 9/28/16.
