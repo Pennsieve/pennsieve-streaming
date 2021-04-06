@@ -3,17 +3,17 @@ package com.pennsieve.streaming
 import akka.stream.scaladsl.Sink
 import cats.data.EitherT
 import cats.implicits._
-import com.blackfynn.domain.CoreError
-import com.blackfynn.models.Channel
-import com.blackfynn.service.utilities.ContextLogger
-import com.blackfynn.streaming.query.{
+import com.pennsieve.domain.CoreError
+import com.pennsieve.models.Channel
+import com.pennsieve.service.utilities.ContextLogger
+import com.pennsieve.streaming.query.{
   LocalFilesystemWsClient,
   QuerySequencer,
   RangeRequest,
   UnitRangeRequest
 }
 import scalikejdbc.DBSession
-import com.blackfynn.streaming.server.TestWebServerPorts
+import com.pennsieve.streaming.server.TestWebServerPorts
 import org.scalatest.Matchers
 import org.scalatest.fixture.WordSpec
 

@@ -4,7 +4,7 @@
 package com.pennsieve.streaming
 
 import org.scalatest.FlatSpec
-import com.blackfynn.streaming.query.TimeSeriesQueryUtils._
+import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 
 /**
   * Created by jsnavely on 2/9/17.

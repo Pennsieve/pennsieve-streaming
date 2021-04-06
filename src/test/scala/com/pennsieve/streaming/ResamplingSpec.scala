@@ -3,8 +3,8 @@ package com.pennsieve.streaming
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Source
-import com.blackfynn.streaming.query.BaseTimeSeriesQuery
-import com.blackfynn.streaming.query.TimeSeriesQueryUtils.contig
+import com.pennsieve.streaming.query.BaseTimeSeriesQuery
+import com.pennsieve.streaming.query.TimeSeriesQueryUtils.contig
 import org.scalatest.FlatSpec
 
 import scala.annotation.tailrec

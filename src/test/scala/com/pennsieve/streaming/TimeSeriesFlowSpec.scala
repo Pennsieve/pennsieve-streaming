@@ -7,13 +7,13 @@ import java.util.concurrent.ConcurrentHashMap
 import akka.http.scaladsl.model.ws.TextMessage.Strict
 import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
 import akka.stream.scaladsl.{ Sink, Source }
-import com.blackfynn.models.Channel
-import com.blackfynn.service.utilities.ContextLogger
-import com.blackfynn.streaming.query.{ LocalFilesystemWsClient, TimeSeriesQueryUtils }
-import com.blackfynn.streaming.query.TimeSeriesQueryUtils._
-import com.blackfynn.streaming.server.TSJsonSupport._
-import com.blackfynn.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage }
-import com.blackfynn.streaming.server._
+import com.pennsieve.models.Channel
+import com.pennsieve.service.utilities.ContextLogger
+import com.pennsieve.streaming.query.{ LocalFilesystemWsClient, TimeSeriesQueryUtils }
+import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
+import com.pennsieve.streaming.server.TSJsonSupport._
+import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage }
+import com.pennsieve.streaming.server._
 import org.scalatest.{ Inspectors, Matchers }
 import org.scalatest.fixture.FlatSpec
 import spray.json._

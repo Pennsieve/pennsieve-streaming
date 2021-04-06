@@ -2,8 +2,8 @@ package com.pennsieve.streaming
 
 import java.io.{ File, PrintWriter }
 
-import com.blackfynn.streaming.server.TSJsonSupport._
-import com.blackfynn.streaming.server.FilterRequest
+import com.pennsieve.streaming.server.TSJsonSupport._
+import com.pennsieve.streaming.server.FilterRequest
 import org.scalatest.FlatSpec
 import uk.me.berndporr.iirj.{ Butterworth, Cascade }
 

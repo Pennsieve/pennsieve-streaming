@@ -1,14 +1,14 @@
 package com.pennsieve.streaming
 
-import com.blackfynn.models.Channel
-import com.blackfynn.streaming.server.{ VirtualChannel => BFVirtualChannel }
+import com.pennsieve.models.Channel
+import com.pennsieve.streaming.server.{ VirtualChannel => BFVirtualChannel }
 import java.util.concurrent.ConcurrentHashMap
 import org.scalatest.{ FlatSpec, Matchers }
 import spray.json._
 import scala.collection.JavaConverters._
 
-import com.blackfynn.streaming.server.{ Montage, MontageRequest, MontageType }
-import com.blackfynn.streaming.server.TSJsonSupport._
+import com.pennsieve.streaming.server.{ Montage, MontageRequest, MontageType }
+import com.pennsieve.streaming.server.TSJsonSupport._
 
 class MontageSpec extends FlatSpec with Matchers {
   val REFERENTIAL_VS_CZ_PACKAGE = "referential_vs_cz_package"

@@ -3,7 +3,7 @@ package com.pennsieve.streaming.query
 import akka.stream.scaladsl.Source
 import akka.stream.stage.{ GraphStage, GraphStageLogic, InHandler, OutHandler }
 import akka.stream._
-import com.blackfynn.service.utilities.ContextLogger
+import com.pennsieve.service.utilities.ContextLogger
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success }

@@ -1,9 +1,9 @@
 package com.pennsieve.streaming
 
 import akka.stream.scaladsl.{ Sink, Source }
-import com.blackfynn.service.utilities.ContextLogger
-import com.blackfynn.streaming.query.chunker.PredicateStreamChunker
-import com.blackfynn.streaming.query.{
+import com.pennsieve.service.utilities.ContextLogger
+import com.pennsieve.streaming.query.chunker.PredicateStreamChunker
+import com.pennsieve.streaming.query.{
   LocalFilesystemWsClient,
   TimeSeriesUnitQueryRawHttp,
   UnitRangeRequest

@@ -4,14 +4,14 @@
 package com.pennsieve.streaming
 
 import akka.stream.scaladsl.{ Sink, Source }
-import com.blackfynn.service.utilities.ContextLogger
-import com.blackfynn.streaming.query.TimeSeriesQueryUtils._
-import com.blackfynn.streaming.query.{
+import com.pennsieve.service.utilities.ContextLogger
+import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
+import com.pennsieve.streaming.query.{
   LocalFilesystemWsClient,
   RangeRequest,
   TimeSeriesQueryRawHttp
 }
-import com.blackfynn.streaming.server.TestWebServerPorts
+import com.pennsieve.streaming.server.TestWebServerPorts
 import org.joda.time.DateTime
 import org.scalatest.fixture.FlatSpec
 

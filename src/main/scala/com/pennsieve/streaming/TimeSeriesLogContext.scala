@@ -1,5 +1,3 @@
-// Copyright (c) [2018] - [2019] Blackfynn, Inc. All Rights Reserved.
-
 package com.pennsieve.streaming
 
 import com.pennsieve.service.utilities.LogContext

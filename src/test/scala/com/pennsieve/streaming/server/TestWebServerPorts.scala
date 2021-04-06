@@ -3,10 +3,10 @@ package com.pennsieve.streaming.server
 import akka.http.scaladsl.model.ws.Message
 import cats.data.EitherT
 import cats.instances.future._
-import com.blackfynn.auth.middleware.Jwt.Claim
-import com.blackfynn.models.Channel
-import com.blackfynn.streaming.TimeSeriesLogContext
-import com.blackfynn.streaming.server.TimeSeriesFlow.WithErrorT
+import com.pennsieve.auth.middleware.Jwt.Claim
+import com.pennsieve.models.Channel
+import com.pennsieve.streaming.TimeSeriesLogContext
+import com.pennsieve.streaming.server.TimeSeriesFlow.WithErrorT
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import spray.json._

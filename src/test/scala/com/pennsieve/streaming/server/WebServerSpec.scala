@@ -5,15 +5,16 @@ import akka.http.scaladsl.model.StatusCodes.Unauthorized
 import akka.http.scaladsl.model.headers.{ Authorization, OAuth2BearerToken }
 import akka.http.scaladsl.model.ws.{ BinaryMessage, TextMessage }
 import akka.http.scaladsl.testkit.{ ScalatestRouteTest, WSProbe }
-import com.blackfynn.auth.middleware.Jwt.Claim
-import com.blackfynn.auth.middleware.Jwt.Role.RoleIdentifier
-import com.blackfynn.auth.middleware.{ DatasetId, Jwt, OrganizationId, UserClaim, UserId }
-import com.blackfynn.core.utilities.JwtAuthenticator._
-import com.blackfynn.models.Role
-import com.blackfynn.service.utilities.ContextLogger
-import com.blackfynn.streaming.query.LocalFilesystemWsClient
-import com.blackfynn.streaming.server.TSJsonSupport._
-import com.blackfynn.streaming.{ SessionGenerator, TestConfig, TestDatabase, TimeSeriesMessage }
+import com.pennsieve.auth.middleware.Jwt.Claim
+import com.pennsieve.auth.middleware.Jwt.Role.RoleIdentifier
+import com.pennsieve.auth.middleware.{ DatasetId, Jwt, OrganizationId, UserClaim, UserId }
+import com.pennsieve.core.utilities.JwtAuthenticator._
+import com.pennsieve.models.Role
+import com.pennsieve.service.utilities.ContextLogger
+import com.pennsieve.streaming.query.LocalFilesystemWsClient
+import com.pennsieve.streaming.server.TSJsonSupport._
+import com.pennsieve.streaming.{ SessionGenerator, TestConfig, TestDatabase }
+import com.blackfynn.streaming.TimeSeriesMessage
 import org.scalatest.{ Inspectors, Matchers }
 import org.scalatest.fixture.WordSpec
 import shapeless.syntax.inject._

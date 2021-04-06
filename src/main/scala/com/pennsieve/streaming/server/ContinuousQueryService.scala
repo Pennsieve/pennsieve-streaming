@@ -5,7 +5,7 @@ import akka.http.scaladsl.server.{ Directives, Route }
 import akka.stream.scaladsl.Source
 import cats.implicits._
 import com.pennsieve.auth.middleware.Jwt
-import com.blackfynn.service.utilities.ContextLogger
+import com.pennsieve.service.utilities.ContextLogger
 import com.blackfynn.streaming.LookupResultRow
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils.{ overLimit, parseLong }
 import com.pennsieve.streaming.query.{ QuerySequencer, RangeRequest }
