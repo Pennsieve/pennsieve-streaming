@@ -40,7 +40,7 @@ credentials += Credentials(
 )
 
 libraryDependencies ++= Seq(
-  "com.pennsieve" %% "pennsieve-core" % "109-fae945f",
+  "com.pennsieve" %% "pennsieve-core" % "27-36566c3",
   "com.blackfynn" %% "timeseries-core" % "1.2.13-SNAPSHOT",
   "com.blackfynn" %% "service-utilities" % "1.3.4-SNAPSHOT",
   "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,

@@ -6,12 +6,7 @@ import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.implicits._
 import com.pennsieve.auth.middleware.{ Jwt, ServiceClaim, UserClaim }
-import com.pennsieve.core.utilities.{
-  InsecureCoreContainer,
-  JwtAuthenticator,
-  RoleOverrideContainer,
-  SecureCoreContainer
-}
+import com.pennsieve.core.utilities.{ InsecureCoreContainer, JwtAuthenticator, SecureCoreContainer }
 import com.pennsieve.domain.CoreError
 import com.pennsieve.models.{ Channel, Organization, Package, User }
 import com.pennsieve.streaming.TimeSeriesLogContext
@@ -97,7 +92,7 @@ class GraphWebServerPorts(
       case ServiceClaim(_) => ???
     }
 
-  private def getSecureContainer(sessionId: String, maybeClaim: Option[Jwt.Claim]): EitherT[
+  private def getSecureContainer(maybeClaim: Option[Jwt.Claim]): EitherT[
     Future,
     CoreError,
     (SecureAWSContainer with SecureCoreContainer, TimeSeriesLogContext)
@@ -106,23 +101,6 @@ class GraphWebServerPorts(
       case Some(claim) =>
         getSecureContainerFromJwt(claim)
 
-      case None =>
-        for {
-          session <- {
-            insecureContainer.sessionManager
-              .get(sessionId)
-              .toEitherT[Future]
-          }
-
-          user <- insecureContainer.userManager.getByNodeId(session.userId)
-
-          org <- session
-            .organization()(insecureContainer.organizationManager, ec)
-
-          sc = secureContainerBuilder(user, org, roleOverrides = List.empty)
-
-          _ = session.refresh(sessionTTL)(insecureContainer.redisManager)
-        } yield (sc, TimeSeriesLogContext(userId = Some(user.id), organizationId = Some(org.id)))
     }
 
   private def secureContainerBuilder(
@@ -139,7 +117,7 @@ class GraphWebServerPorts(
       system.dispatcher,
       system,
       roleOverrides
-    ) with SecureCoreContainer with RoleOverrideContainer
+    ) with SecureCoreContainer
 
   override def getChannels(
     sessionId: String,
@@ -147,7 +125,7 @@ class GraphWebServerPorts(
     maybeClaim: Option[Jwt.Claim]
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
     for {
-      containerAndLogContext <- getSecureContainer(sessionId, maybeClaim)
+      containerAndLogContext <- getSecureContainer(maybeClaim)
         .leftMap(TimeSeriesException.fromCoreError)
       (secureContainer, logContext) = containerAndLogContext
 
@@ -170,7 +148,7 @@ class GraphWebServerPorts(
     maybeClaim: Option[Jwt.Claim]
   ): WithErrorT[(Channel, TimeSeriesLogContext)] = {
     for {
-      containerAndLogContext <- getSecureContainer(sessionId, maybeClaim)
+      containerAndLogContext <- getSecureContainer(maybeClaim)
         .leftMap(TimeSeriesException.fromCoreError)
       (secureContainer, logContext) = containerAndLogContext
       channel <- secureContainer.timeSeriesManager

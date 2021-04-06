@@ -28,8 +28,5 @@ object containers {
     executionContext: ExecutionContext,
     system: ActorSystem,
     roleOverrides: List[Jwt.Role]
-  ) extends SecureContainer(config, db, redisClientPool, user, organization, roleOverrides)(
-        executionContext,
-        system
-      )
+  ) extends SecureContainer(config, db, user, organization)(executionContext, system)
 }
