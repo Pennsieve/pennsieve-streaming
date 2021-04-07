@@ -27,7 +27,6 @@ final case class VirtualChannel(id: String, name: String)
 sealed trait Respondable
 
 final case class TimeSeriesRequest(
-  session: String,
   packageId: String,
   startTime: Long,
   endTime: Long,
@@ -261,7 +260,7 @@ object TSJsonSupport {
   implicit val minimalChannelFormat = jsonFormat2(VirtualChannel)
   implicit val channelsListFormat = jsonFormat1(ChannelsList)
   implicit val timeSeriesErrorFormat = jsonFormat3(TimeSeriesError)
-  implicit val timeSeriesRequestFormat = jsonFormat9(TimeSeriesRequest)
+  implicit val timeSeriesRequestFormat = jsonFormat8(TimeSeriesRequest)
   implicit val KeepAliveFormat = jsonFormat1(KeepAlive)
   implicit val FilterRequestFormat = jsonFormat3(FilterRequest)
   implicit val MontageRequestFormat = jsonFormat2(MontageRequest)

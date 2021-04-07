@@ -62,7 +62,6 @@ class TimeSeriesFlowSpec
     // requests for two adjacent pages
     val request = TextMessage(
       TimeSeriesRequest(
-        session = session,
         packageId = ports.GenericPackage,
         virtualChannels = Some(List(VirtualChannel(id = channelId, name = channelName))),
         startTime = 200000000,
@@ -126,7 +125,6 @@ class TimeSeriesFlowSpec
     // requests for two adjacent pages
     val request = TextMessage(
       TimeSeriesRequest(
-        session = session,
         packageId = ports.GenericPackage,
         virtualChannels = Some(List(VirtualChannel(id = channelId, name = channelName))),
         startTime = 200000000,
@@ -188,7 +186,6 @@ class TimeSeriesFlowSpec
       // for the entire package)
       val request = TextMessage(
         TimeSeriesRequest(
-          session = session,
           packageId = ports.GenericPackage,
           virtualChannels = Some(
             ports.GenericMap
@@ -258,7 +255,6 @@ class TimeSeriesFlowSpec
 
       val request = TextMessage(
         TimeSeriesRequest(
-          session = session,
           packageId = ports.GenericPackage,
           virtualChannels = Some(
             ports.GenericMap
@@ -346,7 +342,6 @@ class TimeSeriesFlowSpec
 
     val request = TextMessage(
       TimeSeriesRequest(
-        session = montageSession,
         packageId = ports.MontagePackage,
         virtualChannels = Some(List(VirtualChannel(id = leadChannelId, name = montageName))),
         startTime = 0,

@@ -21,7 +21,7 @@ import scala.util.Try
 class UnitQueryService(
   querySequencer: QuerySequencer,
   queryLimit: Long,
-  maybeClaim: Option[Claim]
+  claim: Claim
 )(implicit
   ports: WebServerPorts,
   ec: ExecutionContext
@@ -33,69 +33,68 @@ class UnitQueryService(
   implicitly[Encoder[Long]]
 
   def route: Route = path("unit") {
-    parameter('session, 'start, 'end, 'channel, 'limit) {
-      (session, start, end, channelNodeId, limit) =>
-        {
-          get {
-            val unitQuery: WithErrorT[Source[Long, Any]] =
-              for {
-                channelAndLogContext <- {
-                  ports.getChannelByNodeId(session, channelNodeId, maybeClaim)
-                }
-                (channel, logContext) = channelAndLogContext
+    parameter('start, 'end, 'channel, 'limit) { (start, end, channelNodeId, limit) =>
+      {
+        get {
+          val unitQuery: WithErrorT[Source[Long, Any]] =
+            for {
+              channelAndLogContext <- {
+                ports.getChannelByNodeId(channelNodeId, claim)
+              }
+              (channel, logContext) = channelAndLogContext
 
-                startL <- parseLong(start)
-                  .leftMap(TimeSeriesException.fromCoreError)
-                endL <- parseLong(end)
-                  .leftMap(TimeSeriesException.fromCoreError)
-                _ <- overLimit(startL, endL, channel.rate, queryLimit)
-                  .toEitherT[Future]
-                  .leftMap(TimeSeriesException.fromCoreError)
-                limitL = Try(limit.toLong).toOption
-                emptyLookup = UnitRangeEntry(
-                  0,
-                  min = 0,
-                  max = 0,
-                  channel = "",
-                  count = 0,
-                  tsindex = "",
-                  tsblob = ""
-                )
+              startL <- parseLong(start)
+                .leftMap(TimeSeriesException.fromCoreError)
+              endL <- parseLong(end)
+                .leftMap(TimeSeriesException.fromCoreError)
+              _ <- overLimit(startL, endL, channel.rate, queryLimit)
+                .toEitherT[Future]
+                .leftMap(TimeSeriesException.fromCoreError)
+              limitL = Try(limit.toLong).toOption
+              emptyLookup = UnitRangeEntry(
+                0,
+                min = 0,
+                max = 0,
+                channel = "",
+                count = 0,
+                tsindex = "",
+                tsblob = ""
+              )
 
-                ur = UnitRangeRequest(
-                  channel.nodeId,
-                  startL,
-                  endL,
-                  limitL,
-                  pixelWidth = 0,
-                  spikeDuration = 0,
-                  spikeDataPointCount = 0,
-                  sampleRate = 0.0,
-                  lookUp = emptyLookup,
-                  totalRequests = None,
-                  sequenceId = None
-                )
+              ur = UnitRangeRequest(
+                channel.nodeId,
+                startL,
+                endL,
+                limitL,
+                pixelWidth = 0,
+                spikeDuration = 0,
+                spikeDataPointCount = 0,
+                sampleRate = 0.0,
+                lookUp = emptyLookup,
+                totalRequests = None,
+                sequenceId = None
+              )
 
-                qresult <- querySequencer
-                  .unitRangeRequestT(ur)
-                  .leftMap(TimeSeriesException.fromCoreError)
+              qresult <- querySequencer
+                .unitRangeRequestT(ur)
+                .leftMap(TimeSeriesException.fromCoreError)
 
-              } yield qresult
+            } yield qresult
 
-            onComplete(unitQuery.value) {
-              case Success(either) =>
-                either.fold(e => complete { e.statusCode -> e }, data => complete { data })
-              case Failure(unexpected) => {
-                unexpected.printStackTrace()
-                val error =
-                  TimeSeriesException.UnexpectedError(unexpected.toString)
-                complete {
-                  error.statusCode -> error
-                }
+          onComplete(unitQuery.value) {
+            case Success(either) =>
+              either.fold(e => complete { e.statusCode -> e }, data => complete { data })
+            case Failure(unexpected) => {
+              unexpected.printStackTrace()
+              val error =
+                TimeSeriesException.UnexpectedError(unexpected.toString)
+              complete {
+                error.statusCode -> error
               }
             }
           }
         }
+      }
     }
   }
 

@@ -22,15 +22,13 @@ import scala.concurrent.{ ExecutionContext, Future }
   */
 trait WebServerPorts {
   def getChannels(
-    sessionId: String,
     packageNodeId: String,
-    maybeClaim: Option[Jwt.Claim]
+    claim: Jwt.Claim
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)]
 
   def getChannelByNodeId(
-    sessionId: String,
     channelNodeId: String,
-    maybeClaim: Option[Jwt.Claim]
+    claim: Jwt.Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)]
 
   val rangeLookupQuery =
@@ -92,17 +90,6 @@ class GraphWebServerPorts(
       case ServiceClaim(_) => ???
     }
 
-  private def getSecureContainer(maybeClaim: Option[Jwt.Claim]): EitherT[
-    Future,
-    CoreError,
-    (SecureAWSContainer with SecureCoreContainer, TimeSeriesLogContext)
-  ] =
-    maybeClaim match {
-      case Some(claim) =>
-        getSecureContainerFromJwt(claim)
-
-    }
-
   private def secureContainerBuilder(
     user: User,
     org: Organization,
@@ -120,12 +107,11 @@ class GraphWebServerPorts(
     ) with SecureCoreContainer
 
   override def getChannels(
-    sessionId: String,
     packageNodeId: String,
-    maybeClaim: Option[Jwt.Claim]
+    claim: Jwt.Claim
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
     for {
-      containerAndLogContext <- getSecureContainer(maybeClaim)
+      containerAndLogContext <- getSecureContainerFromJwt(claim)
         .leftMap(TimeSeriesException.fromCoreError)
       (secureContainer, logContext) = containerAndLogContext
 
@@ -143,12 +129,11 @@ class GraphWebServerPorts(
     } yield (channels, logContext.withPackageId(`package`.id))
 
   override def getChannelByNodeId(
-    sessionId: String,
     channelNodeId: String,
-    maybeClaim: Option[Jwt.Claim]
+    claim: Jwt.Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)] = {
     for {
-      containerAndLogContext <- getSecureContainer(maybeClaim)
+      containerAndLogContext <- getSecureContainerFromJwt(claim)
         .leftMap(TimeSeriesException.fromCoreError)
       (secureContainer, logContext) = containerAndLogContext
       channel <- secureContainer.timeSeriesManager

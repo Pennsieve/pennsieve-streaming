@@ -35,29 +35,56 @@ class WebServerSpec
   implicit val log = new ContextLogger()
   implicit val wsClient = new LocalFilesystemWsClient
   implicit val ports = new TestWebServerPorts
+  implicit val jwtConfig: Jwt.Config = new Jwt.Config {
+    override def key: String = config.getString("jwt-key")
+  }
   private val userId = 1
   private val organizationId = 1
   private val datasetId = 1
+  private val organizationRole: Jwt.Role = Jwt.OrganizationRole(
+    OrganizationId(organizationId)
+      .inject[RoleIdentifier[OrganizationId]],
+    Role.Owner
+  )
+  private val datasetRole: Jwt.Role =
+    Jwt.DatasetRole(DatasetId(datasetId).inject[RoleIdentifier[DatasetId]], Role.Owner)
+
+  private val ownerClaim: Claim =
+    Jwt.generateClaim(UserClaim(UserId(userId), List(organizationRole, datasetRole)), 1 minute)
+
+  private val ownerToken = Jwt.generateToken(ownerClaim)
 
   "montage validation route" should {
     "validate a montage that contains all correct channels" in { _ =>
-      val session = getRandomSession()
       val packageId = ports.MontagePackage
 
-      Get(s"/ts/validate-montage?session=${session}&package=$packageId") ~> new MontageValidationService(
-        None
-      ).route(session, packageId) ~> check {
+      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(ownerClaim)
+        .route(packageId) ~> check {
         status should be(StatusCodes.OK)
       }
     }
 
     "invalidate a montage that is missing required channels" in { _ =>
-      val session = getRandomSession()
       val packageId = ports.InvalidMontagePackage
 
-      Get(s"/ts/validate-montage?session=${session}&package=$packageId") ~> new MontageValidationService(
-        None
-      ).route(session, packageId) ~> check {
+      implicit val jwtConfig: Jwt.Config = new Jwt.Config {
+        override def key: String = config.getString("jwt-key")
+      }
+
+      val organization: Jwt.Role = Jwt.OrganizationRole(
+        OrganizationId(organizationId)
+          .inject[RoleIdentifier[OrganizationId]],
+        Role.Owner
+      )
+
+      val dataset: Jwt.Role =
+        Jwt.DatasetRole(DatasetId(datasetId).inject[RoleIdentifier[DatasetId]], Role.Owner)
+
+      val claim: Claim =
+        Jwt.generateClaim(UserClaim(UserId(userId), List(organization, dataset)), 1 minute)
+
+      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(claim)
+        .route(packageId) ~> check {
         status should be(StatusCodes.BadRequest)
         responseAs[TimeSeriesException] should be(
           TimeSeriesException.UnexpectedError(
@@ -71,15 +98,17 @@ class WebServerSpec
 
   "timeseries flow route" should {
     "return a data flow for the requested channels" in { implicit dbSession =>
-      val session = getRandomSession()
       val packageId = ports.InvalidMontagePackage
 
       val testClient = WSProbe()
 
-      WS(s"/ts/query?session=${session}&package=${packageId}", testClient.flow) ~> new WebServer().route ~> check {
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+
+      val url = s"/ts/query?package=$packageId"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
-        val timeSeriesRequest = createMessage(session, packageId)
+        val timeSeriesRequest = createMessage(packageId)
 
         testClient.sendMessage(timeSeriesRequest)
 
@@ -103,17 +132,18 @@ class WebServerSpec
 
     "return a data flow starting at 0 for the requested channels if startAtEpoch is set" in {
       implicit dbSession =>
-        val session = getRandomSession()
         val packageId = ports.GenericPackage
 
         val testClient = WSProbe()
 
-        WS(s"/ts/query?session=${session}&package=${packageId}&startAtEpoch=true", testClient.flow) ~> new WebServer().route ~> check {
+        val tokenHeader = OAuth2BearerToken(ownerToken.value)
+
+        val url = s"/ts/query?package=${packageId}&startAtEpoch=true"
+        WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
           isWebSocketUpgrade shouldEqual true
 
           val timeSeriesRequest = TextMessage(
             TimeSeriesRequest(
-              session = session,
               packageId = packageId,
               virtualChannels = Some(
                 ports.GenericMap
@@ -164,13 +194,15 @@ class WebServerSpec
     }
 
     "apply requested filters" in { implicit dbSession =>
-      val session = getRandomSession()
       val packageId = ports.GenericPackage
       val MAX_FREQ = 1.0
 
       val testClient = WSProbe()
 
-      WS(s"/ts/query?session=${session}&package=${packageId}&startAtEpoch=true", testClient.flow) ~> new WebServer().route ~> check {
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+
+      val url = s"/ts/query?package=${packageId}&startAtEpoch=true"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         val channel = ports.GenericMap
@@ -182,7 +214,6 @@ class WebServerSpec
 
         val timeSeriesRequest = TextMessage(
           TimeSeriesRequest(
-            session = session,
             packageId = packageId,
             virtualChannels = Some(List(channel)),
             startTime = 0,
@@ -241,17 +272,17 @@ class WebServerSpec
     }
 
     "support the old 'channels' key for backwards compatibility" in { implicit dbSession =>
-      val session = getRandomSession()
       val packageId = ports.InvalidMontagePackage
 
       val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      WS(s"/ts/query?session=${session}&package=${packageId}", testClient.flow) ~> new WebServer().route ~> check {
+      val url = s"/ts/query?package=${packageId}"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         val timeSeriesRequest = TextMessage(
           TimeSeriesRequest(
-            session = session,
             packageId = packageId,
             channels = Some(ports.InvalidMontageIds),
             startTime = 0,
@@ -280,12 +311,13 @@ class WebServerSpec
     }
 
     "return a montaged data flow when a montage has been applied" in { implicit dbSession =>
-      val montageSession = getRandomSession()
       val montagePackage = ports.MontagePackage
 
       val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      WS(s"/ts/query?session=${montageSession}&package=$montagePackage", testClient.flow) ~> new WebServer().route ~> check {
+      val url = s"/ts/query?package=${montagePackage}"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         // a request to instruct the server to apply a montage
@@ -310,7 +342,6 @@ class WebServerSpec
 
         val timeSeriesRequest = TextMessage(
           TimeSeriesRequest(
-            session = montageSession,
             packageId = montagePackage,
             virtualChannels = Some(virtualChannelsToRequest),
             startTime = 0,
@@ -376,12 +407,13 @@ class WebServerSpec
     }
 
     "return the package channels list when the montage state is cleared" in { implicit dbSession =>
-      val session = getRandomSession()
       val `package` = ports.MontagePackage
 
       val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      WS(s"/ts/query?session=${session}&package=${`package`}", testClient.flow) ~> new WebServer().route ~> check {
+      val url = s"/ts/query?package=${`package`}"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         // a request to instruct the server to clear the montage state
@@ -404,12 +436,13 @@ class WebServerSpec
     }
 
     "do nothing with a keepAlive message" in { implicit dbSession =>
-      val session = getRandomSession()
       val `package` = ports.MontagePackage
 
       val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      WS(s"/ts/query?session=${session}&package=${`package`}", testClient.flow) ~> new WebServer().route ~> check {
+      val url = s"/ts/query?package=${`package`}"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         val keepAlive =
@@ -423,12 +456,13 @@ class WebServerSpec
     }
 
     "bubble up montage missing channels errors to the client" in { implicit dbSession =>
-      val montageSession = getRandomSession
       val montagePackage = ports.InvalidMontagePackage
 
       val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      WS(s"/ts/query?session=${montageSession}&package=$montagePackage", testClient.flow) ~> new WebServer().route ~> check {
+      val url = s"/ts/query?package=$montagePackage"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         // a request to instruct the server to apply a montage
@@ -456,7 +490,6 @@ class WebServerSpec
     }
 
     "bubble up missing channel errors to the client" in { implicit dbSession =>
-      val montageSession = getRandomSession()
       val montagePackage = ports.InvalidMontagePackage
 
       val testClient = WSProbe()
@@ -467,13 +500,14 @@ class WebServerSpec
             case (id, name) =>
               VirtualChannel(id = id, name = name)
           }
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      WS(s"/ts/query?session=${montageSession}&package=$montagePackage", testClient.flow) ~> new WebServer().route ~> check {
+      val url = s"/ts/query?package=$montagePackage"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         val timeSeriesRequest = TextMessage(
           TimeSeriesRequest(
-            session = montageSession,
             packageId = montagePackage,
             virtualChannels = Some(missingChannelsToRequest),
             startTime = 0,
@@ -493,36 +527,17 @@ class WebServerSpec
 
   "A websocket request sent with a jwt auth token" should {
     "stream back data as expected" in { implicit dbSession =>
-      val session = getRandomSession()
       val packageId = ports.MontagePackage
 
       val testClient = WSProbe()
 
-      implicit val jwtConfig: Jwt.Config = new Jwt.Config {
-        override def key: String = config.getString("jwt-key")
-      }
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val organization: Jwt.Role = Jwt.OrganizationRole(
-        OrganizationId(organizationId)
-          .inject[RoleIdentifier[OrganizationId]],
-        Role.Owner
-      )
-
-      val dataset: Jwt.Role =
-        Jwt.DatasetRole(DatasetId(datasetId).inject[RoleIdentifier[DatasetId]], Role.Owner)
-
-      val claim: Claim =
-        Jwt.generateClaim(UserClaim(UserId(userId), List(organization, dataset)), 1 minute)
-
-      val token = Jwt.generateToken(claim)
-
-      val tokenHeader = OAuth2BearerToken(token.value)
-
-      val url = s"/ts/query?package=$packageId&session=$session"
+      val url = s"/ts/query?package=$packageId"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
-        val timeSeriesRequest = createMessage(session, packageId)
+        val timeSeriesRequest = createMessage(packageId)
 
         testClient.sendMessage(timeSeriesRequest)
 
@@ -542,7 +557,6 @@ class WebServerSpec
     }
 
     "return unauthorized for a service level token" in { implicit dbSession =>
-      val session = getRandomSession()
       val packageId = ports.MontagePackage
 
       val testClient = WSProbe()
@@ -556,24 +570,17 @@ class WebServerSpec
 
       val tokenHeader = OAuth2BearerToken(token.value)
 
-      val url = s"/ts/query?package=$packageId&session=$session"
+      val url = s"/ts/query?package=$packageId"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         status shouldBe Unauthorized
       }
     }
   }
 
-  private def createMessage(session: String, packageId: String) =
+  private def createMessage(packageId: String) =
     TextMessage(
-      TimeSeriesRequest(
-        session = session,
-        packageId = packageId,
-        virtualChannels = Some(ports.InvalidMontageMap.map {
-          case (id, name) => VirtualChannel(id = id, name = name)
-        }.toList),
-        startTime = 0,
-        endTime = 100,
-        pixelWidth = 1
-      ).toJson.toString
+      TimeSeriesRequest(packageId = packageId, virtualChannels = Some(ports.InvalidMontageMap.map {
+        case (id, name) => VirtualChannel(id = id, name = name)
+      }.toList), startTime = 0, endTime = 100, pixelWidth = 1).toJson.toString
     )
 }

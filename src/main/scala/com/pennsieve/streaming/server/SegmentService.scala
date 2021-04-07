@@ -19,27 +19,26 @@ class SegmentService(rangeLookUp: RangeLookUp, defaultGapThreshold: Double)
       .map(_.getOrElse(default))
 
   def route = path("segments") {
-    parameter('session, 'start.?, 'end.?, 'channel, 'gapThreshold.?) {
-      (_, start, end, channel, gapThreshold) =>
-        val lookups = for {
-          startString <- start
-          endString <- end
-          startL <- Try(startString.toLong).toOption
-          endL <- Try(endString.toLong).toOption
-        } yield rangeLookUp.lookup(startL, endL, channel)
+    parameter('start.?, 'end.?, 'channel, 'gapThreshold.?) { (start, end, channel, gapThreshold) =>
+      val lookups = for {
+        startString <- start
+        endString <- end
+        startL <- Try(startString.toLong).toOption
+        endL <- Try(endString.toLong).toOption
+      } yield rangeLookUp.lookup(startL, endL, channel)
 
-        val result: Either[Error, List[(Long, Long)]] =
-          getGapThreshold(gapThreshold, defaultGapThreshold).map(
-            findContiguousTimeSpans(lookups.fold(rangeLookUp.get(channel))(l => l), _)
-          )
+      val result: Either[Error, List[(Long, Long)]] =
+        getGapThreshold(gapThreshold, defaultGapThreshold).map(
+          findContiguousTimeSpans(lookups.fold(rangeLookUp.get(channel))(l => l), _)
+        )
 
-        result match {
-          case Left(e) => complete(StatusCodes.BadRequest -> e.getMessage())
-          case Right(spans) =>
-            complete {
-              spans
-            }
-        }
+      result match {
+        case Left(e) => complete(StatusCodes.BadRequest -> e.getMessage())
+        case Right(spans) =>
+          complete {
+            spans
+          }
+      }
     }
   }
 }

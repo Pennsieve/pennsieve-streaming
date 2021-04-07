@@ -15,6 +15,7 @@ import akka.stream.scaladsl.{ Flow, Sink }
 import cats.instances.future._
 import com.pennsieve.auth.middleware.Jwt.{ Claim, Token }
 import com.pennsieve.auth.middleware.{ Jwt, ServiceClaim }
+import com.pennsieve.auth.middleware.Jwt._
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.{ QuerySequencer, WsClient }
 import com.pennsieve.streaming.server.TSJsonSupport._
@@ -69,19 +70,14 @@ class WebServer(
   val querySequencer =
     new QuerySequencer(rangeLookUp, unitRangeLookUp)
 
-  def timeseriesQuery(
-    maybeClaim: Option[Claim]
-  )(
-    session: String,
-    packageId: String,
-    startAtEpochParam: Option[String]
-  ): Route = {
-    val flow = ports.getChannels(session, packageId, maybeClaim).map {
+  def timeseriesQuery(claim: Claim)(packageId: String, startAtEpochParam: Option[String]): Route = {
+    val flow = ports.getChannels(packageId, claim).map {
       case (channels, logContext) =>
         val cmap = channels.map { c =>
           c.nodeId -> c
         }.toMap
 
+        val session = Jwt.generateToken(claim).value
         // initialize the filters for this session with an empty map
         val channelFilters: concurrent.Map[String, Cascade] =
           new ConcurrentHashMap[String, Cascade]().asScala
@@ -122,28 +118,28 @@ class WebServer(
     complete(HealthCheck(connectionCounter.get(), age, current))
   }
 
-  type MaybeClaimToRoute = Option[Claim] => Route
+  type ClaimToRoute = Claim => Route
 
   val segmentQuery: Route =
     new SegmentService(rangeLookUp, defaultGapThreshold).route
-  val continuousQuery: MaybeClaimToRoute =
+  val continuousQuery: ClaimToRoute =
     claim => new ContinuousQueryService(querySequencer, queryLimit, claim).route
-  val unitQuery: MaybeClaimToRoute =
+  val unitQuery: ClaimToRoute =
     claim => new UnitQueryService(querySequencer, queryLimit, claim).route
 
-  val validateMontage: Option[Claim] => (String, String) => Route =
+  val validateMontage: Claim => String => Route =
     claim => new MontageValidationService(claim).route _
 
-  def maybeClaimToRoutes(claim: Option[Claim]): Route =
+  def claimToRoutes(claim: Claim): Route =
     pathPrefix("ts") {
       path("query") {
-        parameter('session, 'package, 'startAtEpoch ?)(timeseriesQuery(claim))
+        parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim))
       } ~ pathPrefix("retrieve") {
         continuousQuery(claim) ~ unitQuery(claim) ~ segmentQuery
       } ~ pathPrefix("health") {
         healthCheck
       } ~ pathPrefix("validate-montage") {
-        parameter('session, 'package)(validateMontage(claim))
+        parameter('package)(validateMontage(claim))
       }
     }
 
@@ -154,11 +150,11 @@ class WebServer(
           case Right(Claim(ServiceClaim(_), _, _)) =>
             complete(HttpResponse(Unauthorized))
 
-          case Right(claim) => maybeClaimToRoutes(Some(claim))
+          case Right(claim) => claimToRoutes(claim)
 
           case Left(_) => complete(HttpResponse(BadRequest))
         }
 
-      case _ => maybeClaimToRoutes(None)
+      case _ => complete(HttpResponse(Unauthorized))
     }
 }
