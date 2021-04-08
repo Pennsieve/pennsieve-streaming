@@ -160,6 +160,6 @@ class WebServer(
           case Left(_) => complete(HttpResponse(BadRequest))
         }
 
-      case _ => noClaimRoutes()
+      case _ => noClaimRoutes() ~ complete(HttpResponse(Unauthorized))
     }
 }
