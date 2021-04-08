@@ -136,10 +136,15 @@ class WebServer(
         parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim))
       } ~ pathPrefix("retrieve") {
         continuousQuery(claim) ~ unitQuery(claim) ~ segmentQuery
-      } ~ pathPrefix("health") {
-        healthCheck
       } ~ pathPrefix("validate-montage") {
         parameter('package)(validateMontage(claim))
+      }
+    }
+
+  def noClaimRoutes(): Route =
+    pathPrefix("ts") {
+      path("health") {
+        healthCheck
       }
     }
 
@@ -155,6 +160,6 @@ class WebServer(
           case Left(_) => complete(HttpResponse(BadRequest))
         }
 
-      case _ => complete(HttpResponse(Unauthorized))
+      case _ => noClaimRoutes()
     }
 }
