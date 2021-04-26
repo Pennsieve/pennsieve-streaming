@@ -2,12 +2,16 @@ organization := "com.pennsieve"
 name := "pennsieve-streaming"
 version := "1.0"
 
-scalaVersion := "2.12.7"
+scalaVersion := "2.12.11"
 
 val AkkaHttpVersion = "10.1.11"
 val AkkaVersion = "2.6.5"
 
-val circeVersion = "0.11.1"
+organization := "com.pennsieve"
+organizationName := "University of Pennsylvania"
+licenses := List("Apache-2.0" -> new URL("https://www.apache.org/licenses/LICENSE-2.0.txt"))
+startYear := Some(2021)
+enablePlugins(AutomateHeaderPlugin)
 
 resolvers ++= Seq(
   "pennsieve-maven-proxy" at "https://nexus.pennsieve.cc/repository/maven-public",
@@ -40,15 +44,15 @@ credentials += Credentials(
 )
 
 libraryDependencies ++= Seq(
+  "com.pennsieve" %% "core-models" % "27-36566c3",
   "com.pennsieve" %% "pennsieve-core" % "27-36566c3",
-  "com.blackfynn" %% "timeseries-core" % "1.2.13-SNAPSHOT",
-  "com.blackfynn" %% "service-utilities" % "1.3.4-SNAPSHOT",
+  "com.pennsieve" %% "timeseries-core" % "4-d8f62a4",
+  "com.pennsieve" %% "service-utilities" % "7-3a0e351",
   "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,
   "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion,
   "com.typesafe.akka" %% "akka-slf4j" % AkkaVersion,
   "de.knutwalker" %% "akka-stream-circe" % "3.4.0",
   "de.knutwalker" %% "akka-http-circe" % "3.4.0",
-  "com.lightbend.akka" %% "akka-stream-alpakka-kinesis" % "0.14",
   "uk.me.berndporr" % "iirj" % "1.1",
   "net.debasishg" %% "redisclient" % "3.30",
   "org.slf4j" % "slf4j-api" % "1.7.25",
@@ -58,13 +62,10 @@ libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-core" % "1.2.3",
   "net.logstash.logback" % "logstash-logback-encoder" % "5.2",
   "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2",
-  "org.postgresql" % "postgresql" % "9.4-1200-jdbc41",
+  "org.postgresql" % "postgresql" % "42.1.4",
   "org.scalikejdbc" %% "scalikejdbc" % "2.5.0",
   "org.scalikejdbc" %% "scalikejdbc-config" % "2.5.0",
-  "com.github.nscala-time" %% "nscala-time" % "2.14.0",
   "com.trueaccord.scalapb" %% "compilerplugin" % "0.6.6",
-  "net.sourceforge.jtransforms" % "jtransforms" % "2.4.0",
-  "org.scalanlp" %% "breeze" % "0.13.2",
   "com.h2database" % "h2" % "1.4.193" % Test,
   "org.scalatest" %% "scalatest" % "3.0.1" % Test,
   "org.scalikejdbc" %% "scalikejdbc-test" % "2.5.0" % Test,
@@ -115,7 +116,6 @@ ThisBuild / scalafmtOnCompile := true
 
 test in assembly := {}
 
-// sbt-docker configuration
 enablePlugins(sbtdocker.DockerPlugin)
 
 dockerfile in docker := {

@@ -1,6 +1,19 @@
-/**
-**   Copyright (c) 2017 Blackfynn, Inc. All Rights Reserved.
-**/
+/*
+ * Copyright 2021 University of Pennsylvania
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pennsieve.streaming.query
 
 import akka.NotUsed
@@ -10,13 +23,13 @@ import akka.http.scaladsl.coding.Gzip
 import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.model.{ HttpRequest, HttpResponse }
 import akka.stream.scaladsl.{ FileIO, Flow, Framing, Keep, Sink, Source }
-import akka.stream.{ ActorMaterializer, OverflowStrategy, QueueOfferResult }
+import akka.stream.{ OverflowStrategy, QueueOfferResult }
 import akka.util.ByteString
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils.resample
 import com.pennsieve.streaming.query.chunker.{ ByteStringChunker, PredicateStreamChunker }
 import java.nio.file.Paths
 import com.pennsieve.streaming.server.StreamUtils.OptionFilter
-import com.blackfynn.streaming.util.{ getDouble, getLong }
+import com.pennsieve.streaming.util.{ getDouble, getLong }
 import scala.concurrent.{ Future, _ }
 import scala.util.{ Failure, Success }
 
@@ -134,8 +147,7 @@ class S3WsClient(
   appconfig: com.typesafe.config.Config
 )(implicit
   val ec: ExecutionContext,
-  system: ActorSystem,
-  materializer: ActorMaterializer
+  system: ActorSystem
 ) extends WsClient {
 
   private val s3host = appconfig.getString("timeseries.s3-host")
