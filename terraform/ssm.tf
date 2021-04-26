@@ -74,12 +74,6 @@ resource "aws_ssm_parameter" "timeseries_address" {
   value = "0.0.0.0"
 }
 
-resource "aws_ssm_parameter" "session_ttl" {
-  name  = "/${var.environment_name}/${var.service_name}/session-ttl"
-  type  = "String"
-  value = "1800"
-}
-
 resource "aws_ssm_parameter" "idle_timeout" {
   name  = "/${var.environment_name}/${var.service_name}/idle-timeout"
   type  = "String"

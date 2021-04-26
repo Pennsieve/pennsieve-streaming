@@ -1,17 +1,31 @@
-/**
-**   Copyright (c) 2017 Blackfynn, Inc. All Rights Reserved.
-**/
+/*
+ * Copyright 2021 University of Pennsylvania
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pennsieve.streaming.query
 
 import akka.Done
+import akka.actor.ActorSystem
 import akka.stream.scaladsl.{ Sink, Source }
-import akka.stream.{ ActorMaterializer, KillSwitches }
+import akka.stream.KillSwitches
 import cats.data.EitherT
 import cats.implicits._
 import com.pennsieve.domain.Error
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils.trim
-import com.blackfynn.streaming.{ RangeLookUp, UnitRangeLookUp }
+import com.pennsieve.streaming.{ RangeLookUp, UnitRangeLookUp }
 import scalikejdbc.DBSession
 
 import scala.concurrent.{ ExecutionContext, Future }
@@ -25,7 +39,7 @@ class QuerySequencer(
 )(implicit
   ec: ExecutionContext,
   log: ContextLogger,
-  materializer: ActorMaterializer,
+  system: ActorSystem,
   dbSession: DBSession,
   val wsClient: WsClient
 ) extends BaseTimeSeriesQuery {

@@ -1,16 +1,30 @@
-/**
-**   Copyright (c) 2017 Blackfynn, Inc. All Rights Reserved.
-**/
+/*
+ * Copyright 2021 University of Pennsylvania
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pennsieve.streaming.server
 
 import java.util.concurrent.ConcurrentHashMap
 
 import akka.NotUsed
+import akka.actor.ActorSystem
 import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
 import akka.http.scaladsl.server.{ Directives, Route }
 import akka.stream.ThrottleMode.Shaping
 import akka.stream.scaladsl.{ Flow, GraphDSL, Merge }
-import akka.stream.{ ActorMaterializer, FlowShape, Graph, KillSwitches }
+import akka.stream.{ FlowShape, Graph, KillSwitches }
 import akka.util.ByteString
 import cats.data.EitherT
 import cats.implicits._
@@ -20,7 +34,7 @@ import com.pennsieve.streaming.query._
 import com.pennsieve.streaming.server.StreamUtils.{ splitMerge, EitherOptionFilter }
 import com.pennsieve.streaming.server.TSJsonSupport._
 import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage, WithError }
-import com.blackfynn.streaming.{ RangeLookUp, TimeSeriesMessage, UnitRangeLookUp }
+import com.pennsieve.streaming.{ RangeLookUp, TimeSeriesMessage, UnitRangeLookUp }
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 import spray.json._
@@ -74,7 +88,7 @@ class TimeSeriesFlow(
   log: ContextLogger,
   dbSession: DBSession,
   ec: ExecutionContext,
-  materializer: ActorMaterializer,
+  system: ActorSystem,
   config: Config,
   wsClient: WsClient
 ) extends TSJsonSupport {

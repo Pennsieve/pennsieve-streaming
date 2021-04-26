@@ -1,22 +1,31 @@
-/**
-**   Copyright (c) 2017 Blackfynn, Inc. All Rights Reserved.
-**/
+/*
+ * Copyright 2021 University of Pennsylvania
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pennsieve.streaming.server
 
 import java.util.concurrent.TimeUnit
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.HttpMethods
-import akka.http.scaladsl.model.headers.{ HttpOrigin, HttpOriginRange }
 import akka.http.scaladsl.server.Route
-import akka.http.scaladsl.server.directives.ExecutionDirectives.handleRejections
 import akka.http.scaladsl.settings.ServerSettings
-import akka.stream.ActorMaterializer
+import akka.actor.ActorSystem
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.S3WsClient
 import com.typesafe.config.{ Config, ConfigFactory }
-import net.ceedubs.ficus.Ficus._
 import scalikejdbc.AutoSession
 import scalikejdbc.config.DBsWithEnv
 
@@ -30,7 +39,6 @@ object Boot extends App {
   DBsWithEnv("postgresTS").setupAll()
 
   implicit val system = ActorSystem("system")
-  implicit val materializer = ActorMaterializer()
 
   implicit val dbSession = AutoSession
 
