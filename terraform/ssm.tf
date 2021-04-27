@@ -1,23 +1,5 @@
 // TIMESERIES DATA PIPELINE CONFIG
 
-resource "aws_ssm_parameter" "redis_host" {
-  name  = "/${var.environment_name}/${var.service_name}/redis-host"
-  type  = "String"
-  value = data.terraform_remote_state.pennsieve_redis.outputs.primary_endpoint_address
-}
-
-resource "aws_ssm_parameter" "redis_auth_token" {
-  name  = "/${var.environment_name}/${var.service_name}/redis-auth-token"
-  type  = "String"
-  value = data.aws_ssm_parameter.redis_auth_token.value
-}
-
-resource "aws_ssm_parameter" "redis_use_ssl" {
-  name  = "/${var.environment_name}/${var.service_name}/redis-use-ssl"
-  type  = "String"
-  value = "true"
-}
-
 resource "aws_ssm_parameter" "cloudfront_url" {
   name  = "/${var.environment_name}/${var.service_name}/cloudfront-url"
   type  = "String"

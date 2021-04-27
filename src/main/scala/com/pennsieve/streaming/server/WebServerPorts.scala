@@ -87,7 +87,7 @@ class GraphWebServerPorts(
           }
         } yield {
           val sContainer =
-            secureContainerBuilder(userContext.user, userContext.organization, claim.content.roles)
+            secureContainerBuilder(userContext.user, userContext.organization)
           (
             sContainer,
             TimeSeriesLogContext(
@@ -104,18 +104,15 @@ class GraphWebServerPorts(
 
   private def secureContainerBuilder(
     user: User,
-    org: Organization,
-    roleOverrides: List[Jwt.Role]
+    org: Organization
   ): SecureAWSContainer with SecureCoreContainer =
     new SecureAWSContainer(
       insecureContainer.config,
       insecureContainer.db,
-      insecureContainer.redisClientPool,
       org,
       user,
       system.dispatcher,
-      system,
-      roleOverrides
+      system
     ) with SecureCoreContainer
 
   override def getChannels(

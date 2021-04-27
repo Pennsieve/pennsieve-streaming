@@ -6,6 +6,7 @@ scalaVersion := "2.12.11"
 
 val AkkaHttpVersion = "10.1.11"
 val AkkaVersion = "2.6.5"
+val CoreVersion = "59-f97b617"
 
 organization := "com.pennsieve"
 organizationName := "University of Pennsylvania"
@@ -44,8 +45,8 @@ credentials += Credentials(
 )
 
 libraryDependencies ++= Seq(
-  "com.pennsieve" %% "core-models" % "27-36566c3",
-  "com.pennsieve" %% "pennsieve-core" % "27-36566c3",
+  "com.pennsieve" %% "core-models" % CoreVersion,
+  "com.pennsieve" %% "pennsieve-core" % CoreVersion,
   "com.pennsieve" %% "timeseries-core" % "4-d8f62a4",
   "com.pennsieve" %% "service-utilities" % "7-3a0e351",
   "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,
@@ -54,7 +55,6 @@ libraryDependencies ++= Seq(
   "de.knutwalker" %% "akka-stream-circe" % "3.4.0",
   "de.knutwalker" %% "akka-http-circe" % "3.4.0",
   "uk.me.berndporr" % "iirj" % "1.1",
-  "net.debasishg" %% "redisclient" % "3.30",
   "org.slf4j" % "slf4j-api" % "1.7.25",
   "org.slf4j" % "jul-to-slf4j" % "1.7.25",
   "org.slf4j" % "jcl-over-slf4j" % "1.7.25",

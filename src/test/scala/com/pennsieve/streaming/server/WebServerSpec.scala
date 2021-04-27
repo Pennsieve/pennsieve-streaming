@@ -83,10 +83,6 @@ class WebServerSpec
     "invalidate a montage that is missing required channels" in { _ =>
       val packageId = ports.InvalidMontagePackage
 
-      implicit val jwtConfig: Jwt.Config = new Jwt.Config {
-        override def key: String = config.getString("jwt-key")
-      }
-
       val organization: Jwt.Role = Jwt.OrganizationRole(
         OrganizationId(organizationId)
           .inject[RoleIdentifier[OrganizationId]],
