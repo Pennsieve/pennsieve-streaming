@@ -21,14 +21,6 @@ import java.util.concurrent.ConcurrentHashMap
 import akka.http.scaladsl.model.ws.TextMessage.Strict
 import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
 import akka.stream.scaladsl.{ Sink, Source }
-import com.pennsieve.streaming.{
-  Event,
-  IngestSegment,
-  RangeLookUp,
-  Segment,
-  TimeSeriesMessage,
-  UnitRangeLookUp
-}
 import com.pennsieve.models.Channel
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.{ LocalFilesystemWsClient, TimeSeriesQueryUtils }
