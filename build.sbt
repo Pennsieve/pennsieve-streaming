@@ -6,7 +6,7 @@ scalaVersion := "2.12.11"
 
 val AkkaHttpVersion = "10.1.11"
 val AkkaVersion = "2.6.5"
-val CoreVersion = "59-f97b617"
+val CoreVersion = "60-017a9f8"
 
 organization := "com.pennsieve"
 organizationName := "University of Pennsylvania"
