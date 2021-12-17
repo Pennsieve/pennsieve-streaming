@@ -18,10 +18,9 @@ package com.pennsieve.streaming.server
 
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.HttpResponse
-import akka.http.scaladsl.model.StatusCodes.{ BadRequest, Unauthorized }
+import akka.http.scaladsl.model.StatusCodes.{ BadRequest, NotFound, Unauthorized }
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import akka.http.scaladsl.server.{ Directives, Route }
 import akka.actor.ActorSystem
@@ -30,7 +29,15 @@ import cats.instances.future._
 import com.pennsieve.auth.middleware.Jwt.{ Claim, Token }
 import com.pennsieve.auth.middleware.{ Jwt, ServiceClaim }
 import com.pennsieve.auth.middleware.Jwt._
+import com.pennsieve.models.PackageType.TimeSeries
 import com.pennsieve.service.utilities.ContextLogger
+import com.pennsieve.streaming.clients.{
+  Error,
+  Id,
+  NotTimeSeries,
+  OrganizationIdResponse,
+  NotFound => PackageNotFound
+}
 import com.pennsieve.streaming.query.{ QuerySequencer, WsClient }
 import com.pennsieve.streaming.server.TSJsonSupport._
 import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage }
@@ -41,6 +48,7 @@ import uk.me.berndporr.iirj.Cascade
 
 import scala.collection.JavaConverters._
 import scala.collection.concurrent
+import scala.util.{ Failure, Success, Try }
 
 class WebServer(
   implicit
@@ -83,8 +91,14 @@ class WebServer(
   val querySequencer =
     new QuerySequencer(rangeLookUp, unitRangeLookUp)
 
-  def timeseriesQuery(claim: Claim)(packageId: String, startAtEpochParam: Option[String]): Route = {
-    val flow = ports.getChannels(packageId, claim).map {
+  def timeseriesQuery(
+    claim: Claim,
+    packageOrgId: Option[Int] = None
+  )(
+    packageId: String,
+    startAtEpochParam: Option[String]
+  ): Route = {
+    val flow = ports.getChannels(packageId, claim, packageOrgId).map {
       case (channels, logContext) =>
         val cmap = channels.map { c =>
           c.nodeId -> c
@@ -131,28 +145,91 @@ class WebServer(
     complete(HealthCheck(connectionCounter.get(), age, current))
   }
 
-  type ClaimToRoute = Claim => Route
+  type ClaimToRoute = (Claim, Option[Int]) => Route
 
   val segmentQuery: Route =
     new SegmentService(rangeLookUp, defaultGapThreshold).route
   val continuousQuery: ClaimToRoute =
-    claim => new ContinuousQueryService(querySequencer, queryLimit, claim).route
+    (claim, packageOrgId) =>
+      new ContinuousQueryService(querySequencer, queryLimit, claim, packageOrgId).route
   val unitQuery: ClaimToRoute =
-    claim => new UnitQueryService(querySequencer, queryLimit, claim).route
+    (claim, packageOrgId) =>
+      new UnitQueryService(querySequencer, queryLimit, claim, packageOrgId).route
 
-  val validateMontage: Claim => String => Route =
+  val validateMontage: Claim => Option[Int] => String => Route =
     claim => new MontageValidationService(claim).route _
 
-  def claimToRoutes(claim: Claim): Route =
-    pathPrefix("ts") {
-      path("query") {
-        parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim))
-      } ~ pathPrefix("retrieve") {
-        continuousQuery(claim) ~ unitQuery(claim) ~ segmentQuery
-      } ~ pathPrefix("validate-montage") {
-        parameter('package)(validateMontage(claim))
+  def claimToRoutes(claim: Claim): Route = {
+    concat(
+      claimToDiscoverRoutes(claim),
+      pathPrefix("ts") {
+        concat(path("query") {
+          parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim))
+        }, pathPrefix("retrieve") {
+          concat(continuousQuery(claim, None), unitQuery(claim, None), segmentQuery)
+        }, path("validate-montage") {
+          parameter('package)(validateMontage(claim)(None))
+        })
+      }
+    )
+  }
+
+  private def unexpectedError(unexpected: Throwable): Route = {
+    log.noContext.error(unexpected.toString)
+    val error =
+      TimeSeriesException.UnexpectedError(unexpected.toString)
+    complete {
+      error.statusCode -> error
+    }
+  }
+
+  private def noOrgId(result: Try[OrganizationIdResponse]): Route = {
+    result match {
+      case Success(PackageNotFound()) => complete(HttpResponse(NotFound))
+      case Success(NotTimeSeries(packageType)) =>
+        complete(BadRequest -> s"requested package is $packageType not $TimeSeries")
+      case Success(Error(unexpected)) => unexpectedError(unexpected)
+      case Failure(unexpected) => unexpectedError(unexpected)
+      //Only the Success(Id) case is missing and that should be handled by the caller
+      case _ => ???
+    }
+  }
+
+  def discoverQueryRoute(claim: Claim): Route =
+    path("query") {
+      parameter('package, 'startAtEpoch ?) { (packageId, startAtEpoch) =>
+        onComplete(ports.discoverApiClient.getOrganizationId(packageId)) {
+          case Success(Id(orgId)) =>
+            timeseriesQuery(claim, Some(orgId))(packageId, startAtEpoch)
+          case result: Try[OrganizationIdResponse] => noOrgId(result)
+        }
       }
     }
+
+  def discoverRetrieveRoutes(claim: Claim): Route = {
+    concat(continuousQuery(claim, None), unitQuery(claim, None), concat(segmentQuery))
+  }
+
+  def discoverValidateMontageRoute(claim: Claim): Route =
+    path("validate-montage") {
+      parameter('package) { packageId =>
+        onComplete(ports.discoverApiClient.getOrganizationId(packageId)) {
+          case Success(Id(packageOrgId)) =>
+            validateMontage(claim)(Some(packageOrgId))(packageId)
+          case result: Try[OrganizationIdResponse] => noOrgId(result)
+        }
+      }
+    }
+
+  def claimToDiscoverRoutes(claim: Claim): Route = {
+    pathPrefix("discover" / "ts") {
+      concat(
+        discoverQueryRoute(claim),
+        pathPrefix("retrieve")(discoverRetrieveRoutes(claim)),
+        discoverValidateMontageRoute(claim)
+      )
+    }
+  }
 
   def noClaimRoutes(): Route =
     pathPrefix("ts") {

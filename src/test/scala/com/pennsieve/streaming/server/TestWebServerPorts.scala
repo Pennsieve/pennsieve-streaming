@@ -22,6 +22,7 @@ import cats.instances.future._
 import com.pennsieve.auth.middleware.Jwt.Claim
 import com.pennsieve.models.Channel
 import com.pennsieve.streaming.TimeSeriesLogContext
+import com.pennsieve.streaming.clients.{ DiscoverApiClient, MockDiscoverApiClient }
 import com.pennsieve.streaming.server.TimeSeriesFlow.WithErrorT
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -136,13 +137,15 @@ class TestWebServerPorts extends WebServerPorts {
 
   override def getChannels(
     packageNodeId: String,
-    claim: Claim
+    claim: Claim,
+    packageOrgId: Option[Int]
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
     EitherT.pure((packageMap(packageNodeId), TimeSeriesLogContext()))
 
   override def getChannelByNodeId(
     channelNodeId: String,
-    claim: Claim
+    claim: Claim,
+    packageOrgId: Option[Int]
   ): WithErrorT[(Channel, TimeSeriesLogContext)] =
     EitherT.pure((createDummyChannel(channelNodeId), TimeSeriesLogContext()))
 
@@ -162,4 +165,6 @@ class TestWebServerPorts extends WebServerPorts {
     */
   def parseProtobufFromMessage[A](parse: Array[Byte] => A)(message: Message): A =
     parse(message.asBinaryMessage.getStrictData.toArray)
+
+  override def discoverApiClient: DiscoverApiClient = new MockDiscoverApiClient()
 }

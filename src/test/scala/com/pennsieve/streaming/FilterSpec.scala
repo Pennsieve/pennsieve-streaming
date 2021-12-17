@@ -50,7 +50,7 @@ class FilterSpec extends FlatSpec {
   }
 
   "the butterworth bandstop filter" should "filter out the requested band" in {
-    val path = getClass.getResource("/combined.txt").getPath
+    val path = getClass.getResource("/combined.txt").toURI.getPath
     val data = readFromFile(path)
     val filtered = notchFilter(data, 250.0, 50.0)
 

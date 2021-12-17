@@ -75,7 +75,7 @@ class WebServerSpec
       val packageId = ports.MontagePackage
 
       Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(ownerClaim)
-        .route(packageId) ~> check {
+        .route(None)(packageId) ~> check {
         status should be(StatusCodes.OK)
       }
     }
@@ -96,7 +96,7 @@ class WebServerSpec
         Jwt.generateClaim(UserClaim(UserId(userId), List(organization, dataset)), 1 minute)
 
       Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(claim)
-        .route(packageId) ~> check {
+        .route(None)(packageId) ~> check {
         status should be(StatusCodes.BadRequest)
         responseAs[TimeSeriesException] should be(
           TimeSeriesException.UnexpectedError(
@@ -585,6 +585,16 @@ class WebServerSpec
       val url = s"/ts/query?package=$packageId"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         status shouldBe Unauthorized
+      }
+    }
+  }
+
+  "health check route" should {
+    "work without a JWT" in { implicit dbSession =>
+      Get("/ts/health") ~> new WebServer().route ~> check {
+        status should be(StatusCodes.OK)
+        responseAs[HealthCheck].connections should be(0)
+
       }
     }
   }

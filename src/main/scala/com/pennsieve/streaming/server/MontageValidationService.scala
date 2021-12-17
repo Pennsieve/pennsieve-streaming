@@ -30,9 +30,9 @@ class MontageValidationService(
 ) extends Directives
     with TSJsonSupport {
 
-  def route(packageId: String): Route =
+  def route(packageOrgId: Option[Int])(packageId: String): Route =
     get {
-      onComplete(ports.getChannels(packageId, claim).value) {
+      onComplete(ports.getChannels(packageId, claim, packageOrgId).value) {
         case Failure(e) => complete(StatusCodes.InternalServerError, e)
         case Success(channelsResult) =>
           channelsResult
