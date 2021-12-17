@@ -33,8 +33,7 @@ import scala.util.{ Failure, Success, Try }
 class ContinuousQueryService(
   querySequencer: QuerySequencer,
   queryLimit: Long,
-  claim: Jwt.Claim,
-  packageOrgId: Option[Int]
+  claim: Jwt.Claim
 )(implicit
   ports: WebServerPorts,
   ec: ExecutionContext,
@@ -52,7 +51,7 @@ class ContinuousQueryService(
           get {
             val rangeQuery: WithErrorT[Source[(Long, Double), Any]] =
               for {
-                channelAndLogContext <- ports.getChannelByNodeId(channelNodeId, claim, packageOrgId)
+                channelAndLogContext <- ports.getChannelByNodeId(channelNodeId, claim)
                 (channel, logContext) = channelAndLogContext
 
                 startL <- parseLong(start)

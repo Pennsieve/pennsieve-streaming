@@ -28,7 +28,7 @@ import com.pennsieve.streaming.clients.{ DiscoverApiClient, DiscoverApiClientImp
 import com.pennsieve.streaming.server.TimeSeriesFlow.WithErrorT
 import com.pennsieve.streaming.server.containers.{
   InsecureAWSContainer,
-  OrganizationScopedAWSContainer,
+  OrganizationScopedContainer,
   ScopedContainer,
   SecureAWSContainer
 }
@@ -49,8 +49,7 @@ trait WebServerPorts {
 
   def getChannelByNodeId(
     channelNodeId: String,
-    claim: Jwt.Claim,
-    packageOrgId: Option[Int] = None
+    claim: Jwt.Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)]
 
   def discoverApiClient: DiscoverApiClient
@@ -134,13 +133,14 @@ class GraphWebServerPorts(
     packageOrgOpt match {
       case None => secureContainerBuilder(user, userOrg)
       case Some(packageOrg) =>
-        new OrganizationScopedAWSContainer(
+        new OrganizationScopedContainer(
           insecureContainer.config,
           insecureContainer.db,
           packageOrg,
           system.dispatcher,
           system
         )
+
     }
   }
 
@@ -179,11 +179,10 @@ class GraphWebServerPorts(
 
   override def getChannelByNodeId(
     channelNodeId: String,
-    claim: Jwt.Claim,
-    packageOrgId: Option[Int]
+    claim: Jwt.Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)] = {
     for {
-      containerAndLogContext <- getSecureContainerFromJwt(claim, packageOrgId)
+      containerAndLogContext <- getSecureContainerFromJwt(claim, None)
         .leftMap(TimeSeriesException.fromCoreError)
       (secureContainer, logContext) = containerAndLogContext
       channel <- secureContainer.timeSeriesManager

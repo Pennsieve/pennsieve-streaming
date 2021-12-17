@@ -66,26 +66,16 @@ object containers {
   class OrganizationScopedContainer(
     val config: Config,
     _db: Database,
-    val organization: Organization
-  )(implicit
+    val organization: Organization,
+    implicit
     val ec: ExecutionContext,
     val system: ActorSystem
-  ) extends Container
+  ) extends ScopedContainer
       with OrganizationContainer
-      with DatabaseContainer {
+      with DatabaseContainer
+      with PackagesMapperContainer {
 
     override lazy val db: Database = _db
-  }
-
-  class OrganizationScopedAWSContainer(
-    config: Config,
-    db: Database,
-    organization: Organization,
-    executionContext: ExecutionContext,
-    system: ActorSystem
-  ) extends OrganizationScopedContainer(config, db, organization)(executionContext, system)
-      with ScopedContainer
-      with PackagesMapperContainer {
 
     override def getPackageByNodeId(nodeId: String): EitherT[Future, CoreError, Package] = {
       val query = packagesMapper
@@ -96,4 +86,5 @@ object containers {
       db.run(query).whenNone(NotFound(s"Package ($nodeId)"))
     }
   }
+
 }

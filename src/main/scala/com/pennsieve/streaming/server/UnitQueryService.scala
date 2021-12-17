@@ -37,8 +37,7 @@ import scala.util.Try
 class UnitQueryService(
   querySequencer: QuerySequencer,
   queryLimit: Long,
-  claim: Claim,
-  packageOrgId: Option[Int]
+  claim: Claim
 )(implicit
   ports: WebServerPorts,
   ec: ExecutionContext
@@ -56,7 +55,7 @@ class UnitQueryService(
           val unitQuery: WithErrorT[Source[Long, Any]] =
             for {
               channelAndLogContext <- {
-                ports.getChannelByNodeId(channelNodeId, claim, packageOrgId)
+                ports.getChannelByNodeId(channelNodeId, claim)
               }
               (channel, logContext) = channelAndLogContext
 

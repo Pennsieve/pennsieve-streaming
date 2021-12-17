@@ -143,16 +143,14 @@ class WebServer(
     complete(HealthCheck(connectionCounter.get(), age, current))
   }
 
-  type ClaimToRoute = (Claim, Option[Int]) => Route
+  type ClaimToRoute = Claim => Route
 
   val segmentQuery: Route =
     new SegmentService(rangeLookUp, defaultGapThreshold).route
   val continuousQuery: ClaimToRoute =
-    (claim, packageOrgId) =>
-      new ContinuousQueryService(querySequencer, queryLimit, claim, packageOrgId).route
+    claim => new ContinuousQueryService(querySequencer, queryLimit, claim).route
   val unitQuery: ClaimToRoute =
-    (claim, packageOrgId) =>
-      new UnitQueryService(querySequencer, queryLimit, claim, packageOrgId).route
+    claim => new UnitQueryService(querySequencer, queryLimit, claim).route
 
   val validateMontage: Claim => Option[Int] => String => Route =
     claim => new MontageValidationService(claim).route _
@@ -164,7 +162,7 @@ class WebServer(
         concat(path("query") {
           parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim))
         }, pathPrefix("retrieve") {
-          concat(continuousQuery(claim, None), unitQuery(claim, None), segmentQuery)
+          retrieveRoutes(claim)
         }, path("validate-montage") {
           parameter('package)(validateMontage(claim)(None))
         })
@@ -192,7 +190,7 @@ class WebServer(
       //Only the Success(Id) case is missing and that should be handled by the caller
       case unexpectedCase =>
         throw new AssertionError(
-          s"Programming error: unexpected case: $unexpectedCase while looking up organization if for package $packageId"
+          s"Programming error: unexpected case: $unexpectedCase while looking up organization id for package $packageId"
         )
     }
   }
@@ -208,8 +206,8 @@ class WebServer(
       }
     }
 
-  def discoverRetrieveRoutes(claim: Claim): Route = {
-    concat(continuousQuery(claim, None), unitQuery(claim, None), concat(segmentQuery))
+  def retrieveRoutes(claim: Claim): Route = {
+    concat(continuousQuery(claim), unitQuery(claim), concat(segmentQuery))
   }
 
   def discoverValidateMontageRoute(claim: Claim): Route =
@@ -227,7 +225,7 @@ class WebServer(
     pathPrefix("discover" / "ts") {
       concat(
         discoverQueryRoute(claim),
-        pathPrefix("retrieve")(discoverRetrieveRoutes(claim)),
+        pathPrefix("retrieve")(retrieveRoutes(claim)),
         discoverValidateMontageRoute(claim)
       )
     }

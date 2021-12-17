@@ -50,16 +50,16 @@ class MockDiscoverApiClient extends DiscoverApiClient {
     files: Seq[File] = defaultFiles
   )
 
-  val defaultResponse = Right(FileResponse())
+  val defaultResponse: FileResponse = FileResponse()
 
-  var response: Either[HttpError, FileResponse] = defaultResponse
+  var response: Either[HttpError, FileResponse] = Right(defaultResponse)
 
   def setResponse(expectedResponse: Either[HttpError, FileResponse]): Unit = {
     response = expectedResponse
   }
 
   def resetResponse(): Unit = {
-    response = defaultResponse
+    response = Right(defaultResponse)
   }
 
   override def getFileTreePage(

@@ -144,8 +144,7 @@ class TestWebServerPorts extends WebServerPorts {
 
   override def getChannelByNodeId(
     channelNodeId: String,
-    claim: Claim,
-    packageOrgId: Option[Int]
+    claim: Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)] =
     EitherT.pure((createDummyChannel(channelNodeId), TimeSeriesLogContext()))
 
