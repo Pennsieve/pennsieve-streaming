@@ -18,7 +18,6 @@ package com.pennsieve.streaming.server
 
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import akka.actor.ActorSystem
 import akka.http.scaladsl.model.HttpResponse
 import akka.http.scaladsl.model.StatusCodes.{ BadRequest, NotFound, Unauthorized }
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
@@ -28,7 +27,6 @@ import akka.stream.scaladsl.{ Flow, Sink }
 import cats.instances.future._
 import com.pennsieve.auth.middleware.Jwt.{ Claim, Token }
 import com.pennsieve.auth.middleware.{ Jwt, ServiceClaim }
-import com.pennsieve.auth.middleware.Jwt._
 import com.pennsieve.models.PackageType.TimeSeries
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.clients.{
@@ -174,24 +172,28 @@ class WebServer(
     )
   }
 
-  private def unexpectedError(unexpected: Throwable): Route = {
-    log.noContext.error(unexpected.toString)
+  private def unexpectedError(unexpected: Throwable, packageId: String): Route = {
+    val message = s"error looking up organization id for package ($packageId): $unexpected"
+    log.noContext.error(message)
     val error =
-      TimeSeriesException.UnexpectedError(unexpected.toString)
+      TimeSeriesException.UnexpectedError(message)
     complete {
       error.statusCode -> error
     }
   }
 
-  private def noOrgId(result: Try[OrganizationIdResponse]): Route = {
+  private def noOrgId(result: Try[OrganizationIdResponse], packageId: String): Route = {
     result match {
-      case Success(PackageNotFound()) => complete(HttpResponse(NotFound))
-      case Success(NotTimeSeries(packageType)) =>
-        complete(BadRequest -> s"requested package is $packageType not $TimeSeries")
-      case Success(Error(unexpected)) => unexpectedError(unexpected)
-      case Failure(unexpected) => unexpectedError(unexpected)
+      case Success(PackageNotFound()) => complete(NotFound -> s"$packageId not found")
+      case Success(NotTimeSeries()) =>
+        complete(BadRequest -> s"package $packageId is not a $TimeSeries")
+      case Success(Error(unexpected)) => unexpectedError(unexpected, packageId)
+      case Failure(unexpected) => unexpectedError(unexpected, packageId)
       //Only the Success(Id) case is missing and that should be handled by the caller
-      case _ => ???
+      case unexpectedCase =>
+        throw new AssertionError(
+          s"Programming error: unexpected case: $unexpectedCase while looking up organization if for package $packageId"
+        )
     }
   }
 
@@ -201,7 +203,7 @@ class WebServer(
         onComplete(ports.discoverApiClient.getOrganizationId(packageId)) {
           case Success(Id(orgId)) =>
             timeseriesQuery(claim, Some(orgId))(packageId, startAtEpoch)
-          case result: Try[OrganizationIdResponse] => noOrgId(result)
+          case result: Try[OrganizationIdResponse] => noOrgId(result, packageId)
         }
       }
     }
@@ -216,7 +218,7 @@ class WebServer(
         onComplete(ports.discoverApiClient.getOrganizationId(packageId)) {
           case Success(Id(packageOrgId)) =>
             validateMontage(claim)(Some(packageOrgId))(packageId)
-          case result: Try[OrganizationIdResponse] => noOrgId(result)
+          case result: Try[OrganizationIdResponse] => noOrgId(result, packageId)
         }
       }
     }

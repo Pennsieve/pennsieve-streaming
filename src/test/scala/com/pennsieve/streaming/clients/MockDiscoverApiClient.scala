@@ -41,7 +41,7 @@ class MockDiscoverApiClient extends DiscoverApiClient {
     )
   )
 
-  val defaultTotalCount = defaultFiles.size
+  val defaultTotalCount: Long = defaultFiles.size
   val defaultOrgId = 1
 
   case class FileResponse(

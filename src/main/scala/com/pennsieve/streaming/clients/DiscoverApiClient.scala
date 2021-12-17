@@ -16,8 +16,10 @@
 
 package com.pennsieve.streaming.clients
 
+import akka.http.scaladsl.model.StatusCodes
 import cats.data.EitherT
-import com.pennsieve.models.PackageType
+import cats.implicits._
+import com.pennsieve.models.PackageType.TimeSeries
 import com.pennsieve.streaming.clients.HttpClient.HttpClient
 import io.circe.syntax.EncoderOps
 import io.circe.{ Decoder, DecodingFailure, Encoder, ObjectEncoder }
@@ -28,7 +30,7 @@ sealed trait OrganizationIdResponse
 
 case class Id(organizationId: Int) extends OrganizationIdResponse
 case class NotFound() extends OrganizationIdResponse
-case class NotTimeSeries(packageType: PackageType) extends OrganizationIdResponse
+case class NotTimeSeries() extends OrganizationIdResponse
 case class Error(message: HttpError) extends OrganizationIdResponse
 
 trait DiscoverApiClient {
@@ -45,10 +47,20 @@ trait DiscoverApiClient {
     packageId: String
   )(implicit
     ec: ExecutionContext
-  ): Future[OrganizationIdResponse] = ???
+  ): Future[OrganizationIdResponse] =
+    getFileTreePage(packageId).fold(
+      e => if (e.statusCode == StatusCodes.NotFound) NotFound() else Error(e),
+      p =>
+        if (p.files
+            .exists(f => f.isInstanceOf[File] && f.asInstanceOf[File].packageType == TimeSeries))
+          Id(p.organizationId)
+        else
+          NotTimeSeries()
+    )
 }
 
 class DiscoverApiClientImpl(host: String, httpClient: HttpClient) extends DiscoverApiClient {
+
   override def getFileTreePage(
     packageId: String,
     offset: Int,
@@ -57,11 +69,6 @@ class DiscoverApiClientImpl(host: String, httpClient: HttpClient) extends Discov
     ec: ExecutionContext
   ): EitherT[Future, HttpError, FileTreePage] = ???
 
-  override def getOrganizationId(
-    packageId: String
-  )(implicit
-    ec: ExecutionContext
-  ): Future[OrganizationIdResponse] = ???
 }
 
 trait FileTreeNodeDTO {
