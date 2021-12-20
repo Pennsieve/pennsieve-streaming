@@ -17,62 +17,40 @@
 package com.pennsieve.streaming.clients
 import cats.data.EitherT
 import cats.implicits._
+import com.pennsieve.streaming.server.TimeSeriesException
 
-import com.pennsieve.models.FileType.MEF
-import com.pennsieve.models.Icon.Timeseries
-import com.pennsieve.models.PackageType.TimeSeries
-
-import java.time.OffsetDateTime
 import scala.concurrent.{ ExecutionContext, Future }
 
 class MockDiscoverApiClient extends DiscoverApiClient {
 
-  val defaultFiles: Seq[File] = Seq(
-    File(
-      name = "channel1.mef",
-      path = "files/channel1.mef",
-      size = 65003000,
-      icon = Timeseries,
-      uri = "s3://bucket/1/2/files/channel1.mef",
-      fileType = MEF,
-      packageType = TimeSeries,
-      sourcePackageId = None,
-      createdAt = Some(OffsetDateTime.parse("2007-12-03T10:15:30+01:00"))
-    )
-  )
-
-  val defaultTotalCount: Long = defaultFiles.size
   val defaultOrgId = 1
 
-  case class FileResponse(
-    totalCount: Long = defaultTotalCount,
-    organizationId: Int = defaultOrgId,
-    files: Seq[File] = defaultFiles
-  )
+  val defaultResponse: Right[TimeSeriesException, Int] = Right(defaultOrgId)
 
-  val defaultResponse: FileResponse = FileResponse()
+  var response: Either[TimeSeriesException, Int] = defaultResponse
 
-  var response: Either[HttpError, FileResponse] = Right(defaultResponse)
-
-  def setResponse(expectedResponse: Either[HttpError, FileResponse]): Unit = {
+  def setResponse(expectedResponse: Either[TimeSeriesException, Int]): Unit = {
     response = expectedResponse
   }
 
   def resetResponse(): Unit = {
-    response = Right(defaultResponse)
+    response = defaultResponse
   }
 
-  override def getFileTreePage(
-    packageId: String,
-    offset: Int,
-    limit: Int
+  override def getOrganizationId(
+    packageId: String
   )(implicit
     ec: ExecutionContext
-  ): EitherT[Future, HttpError, FileTreePage] = {
-    response.fold(EitherT.leftT(_), r => {
-      val files = r.files.map(_.copy(sourcePackageId = Some(packageId)))
-      EitherT.rightT(FileTreePage(limit, offset, r.totalCount, files, r.organizationId))
-    })
+  ): EitherT[Future, TimeSeriesException, Int] = {
+    response.fold(EitherT.leftT(_), EitherT.rightT(_))
 
   }
+
+  /*override def getOrganizationId(
+    packageId: String
+  )(implicit
+    ec: ExecutionContext
+  ): Future[OrganizationIdResponse] = Future.successful(Id(1))
+
+ */
 }

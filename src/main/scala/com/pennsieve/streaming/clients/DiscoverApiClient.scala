@@ -16,59 +16,58 @@
 
 package com.pennsieve.streaming.clients
 
-import akka.http.scaladsl.model.StatusCodes
+import akka.http.scaladsl.model.{ HttpMethods, HttpRequest }
 import cats.data.EitherT
 import cats.implicits._
 import com.pennsieve.models.PackageType.TimeSeries
 import com.pennsieve.streaming.clients.HttpClient.HttpClient
+import com.pennsieve.streaming.server.TimeSeriesException
+import com.pennsieve.streaming.server.TimeSeriesException.{ DiscoverApiError, UnexpectedError }
 import io.circe.syntax.EncoderOps
+import io.circe.parser.decode
 import io.circe.{ Decoder, DecodingFailure, Encoder, ObjectEncoder }
 
 import scala.concurrent.{ ExecutionContext, Future }
 
-sealed trait OrganizationIdResponse
-
-case class Id(organizationId: Int) extends OrganizationIdResponse
-case class NotFound() extends OrganizationIdResponse
-case class NotTimeSeries() extends OrganizationIdResponse
-case class Error(message: HttpError) extends OrganizationIdResponse
-
 trait DiscoverApiClient {
-
-  def getFileTreePage(
-    packageId: String,
-    offset: Int = 0,
-    limit: Int = 100
-  )(implicit
-    ec: ExecutionContext
-  ): EitherT[Future, HttpError, FileTreePage]
 
   def getOrganizationId(
     packageId: String
   )(implicit
     ec: ExecutionContext
-  ): Future[OrganizationIdResponse] =
-    getFileTreePage(packageId).fold(
-      e => if (e.statusCode == StatusCodes.NotFound) NotFound() else Error(e),
-      p =>
-        if (p.files
-            .exists(f => f.isInstanceOf[File] && f.asInstanceOf[File].packageType == TimeSeries))
-          Id(p.organizationId)
-        else
-          NotTimeSeries()
-    )
+  ): EitherT[Future, TimeSeriesException, Int]
+
+  def extractOrganizationId(
+    packageId: String
+  )(
+    page: FileTreePage
+  ): Either[TimeSeriesException, Int] = {
+    if (page.isTimeSeries) {
+      Right(page.organizationId)
+    } else {
+      Left(com.pennsieve.streaming.server.TimeSeriesException.NotTimeSeries(packageId))
+    }
+  }
 }
 
 class DiscoverApiClientImpl(host: String, httpClient: HttpClient) extends DiscoverApiClient {
 
-  override def getFileTreePage(
-    packageId: String,
-    offset: Int,
-    limit: Int
+  override def getOrganizationId(
+    packageId: String
   )(implicit
     ec: ExecutionContext
-  ): EitherT[Future, HttpError, FileTreePage] = ???
-
+  ): EitherT[Future, TimeSeriesException, Int] = {
+    val request =
+      HttpRequest(uri = s"$host/packages/$packageId/files", method = HttpMethods.GET)
+    val page = httpClient(request)
+    page.transform {
+      case Left(httpError: HttpError) => Left(DiscoverApiError(httpError))
+      case Right(payload) =>
+        decode[FileTreePage](payload)
+          .leftMap(e => UnexpectedError(e.getMessage))
+          .flatMap(extractOrganizationId(packageId))
+    }
+  }
 }
 
 trait FileTreeNodeDTO {
@@ -177,7 +176,11 @@ case class FileTreePage(
   totalCount: Long,
   files: Seq[FileTreeNodeDTO] = Seq.empty,
   organizationId: Int
-)
+) {
+  def isTimeSeries: Boolean = {
+    files.exists(f => f.isInstanceOf[File] && f.asInstanceOf[File].packageType == TimeSeries)
+  }
+}
 
 object FileTreePage {
   implicit val encodeFileTreeWithOrgPage: ObjectEncoder[FileTreePage] = {

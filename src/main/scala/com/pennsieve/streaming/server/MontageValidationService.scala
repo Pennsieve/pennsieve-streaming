@@ -18,15 +18,17 @@ package com.pennsieve.streaming.server
 
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.{ Directives, Route }
+import cats.implicits._
 import com.pennsieve.auth.middleware.Jwt.Claim
-import com.pennsieve.streaming.server.TSJsonSupport._
 
+import scala.concurrent.ExecutionContext
 import scala.util.{ Failure, Success }
 
 class MontageValidationService(
   claim: Claim
 )(implicit
-  ports: WebServerPorts
+  ports: WebServerPorts,
+  ec: ExecutionContext
 ) extends Directives
     with TSJsonSupport {
 
@@ -43,4 +45,26 @@ class MontageValidationService(
             .fold(err => complete(err.statusCode, err), _ => complete(StatusCodes.OK))
       }
     }
+
+  def discoverRoute(packageId: String): Route = {
+    val forResult = for {
+      packageOrgId <- ports.discoverApiClient.getOrganizationId(packageId)
+      channelsResult <- ports
+        .getChannels(packageId, claim, Some(packageOrgId))
+    } yield channelsResult
+
+    get {
+      onComplete(forResult.value) {
+        case Failure(e) => complete(StatusCodes.InternalServerError, e)
+        case Success(channelsResult) =>
+          channelsResult
+            .flatMap {
+              case (channels, _) =>
+                Montage.validateAllMontages(channels.map(_.name))
+            }
+            .fold(err => complete(err.statusCode, err), _ => complete(StatusCodes.OK))
+      }
+    }
+  }
+
 }

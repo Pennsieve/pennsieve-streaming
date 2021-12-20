@@ -19,7 +19,7 @@ package com.pennsieve.streaming.server
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import akka.http.scaladsl.model.HttpResponse
-import akka.http.scaladsl.model.StatusCodes.{ BadRequest, NotFound, Unauthorized }
+import akka.http.scaladsl.model.StatusCodes.{ BadRequest, Unauthorized }
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import akka.http.scaladsl.server.{ Directives, Route }
 import akka.actor.ActorSystem
@@ -27,15 +27,7 @@ import akka.stream.scaladsl.{ Flow, Sink }
 import cats.instances.future._
 import com.pennsieve.auth.middleware.Jwt.{ Claim, Token }
 import com.pennsieve.auth.middleware.{ Jwt, ServiceClaim }
-import com.pennsieve.models.PackageType.TimeSeries
 import com.pennsieve.service.utilities.ContextLogger
-import com.pennsieve.streaming.clients.{
-  Error,
-  Id,
-  NotTimeSeries,
-  OrganizationIdResponse,
-  NotFound => PackageNotFound
-}
 import com.pennsieve.streaming.query.{ QuerySequencer, WsClient }
 import com.pennsieve.streaming.server.TSJsonSupport._
 import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage }
@@ -46,7 +38,7 @@ import uk.me.berndporr.iirj.Cascade
 
 import scala.collection.JavaConverters._
 import scala.collection.concurrent
-import scala.util.{ Failure, Success, Try }
+import scala.util.Success
 
 class WebServer(
   implicit
@@ -155,6 +147,9 @@ class WebServer(
   val validateMontage: Claim => Option[Int] => String => Route =
     claim => new MontageValidationService(claim).route _
 
+  val discoverValidateMontageRoute: Claim => String => Route =
+    claim => new MontageValidationService(claim).discoverRoute _
+
   def claimToRoutes(claim: Claim): Route = {
     concat(
       claimToDiscoverRoutes(claim),
@@ -170,38 +165,14 @@ class WebServer(
     )
   }
 
-  private def unexpectedError(unexpected: Throwable, packageId: String): Route = {
-    val message = s"error looking up organization id for package ($packageId): $unexpected"
-    log.noContext.error(message)
-    val error =
-      TimeSeriesException.UnexpectedError(message)
-    complete {
-      error.statusCode -> error
-    }
-  }
-
-  private def noOrgId(result: Try[OrganizationIdResponse], packageId: String): Route = {
-    result match {
-      case Success(PackageNotFound()) => complete(NotFound -> s"$packageId not found")
-      case Success(NotTimeSeries()) =>
-        complete(BadRequest -> s"package $packageId is not a $TimeSeries")
-      case Success(Error(unexpected)) => unexpectedError(unexpected, packageId)
-      case Failure(unexpected) => unexpectedError(unexpected, packageId)
-      //Only the Success(Id) case is missing and that should be handled by the caller
-      case unexpectedCase =>
-        throw new AssertionError(
-          s"Programming error: unexpected case: $unexpectedCase while looking up organization id for package $packageId"
-        )
-    }
-  }
-
   def discoverQueryRoute(claim: Claim): Route =
     path("query") {
       parameter('package, 'startAtEpoch ?) { (packageId, startAtEpoch) =>
-        onComplete(ports.discoverApiClient.getOrganizationId(packageId)) {
-          case Success(Id(orgId)) =>
+        onComplete(ports.discoverApiClient.getOrganizationId(packageId).value) {
+          case Success(Right(orgId)) =>
             timeseriesQuery(claim, Some(orgId))(packageId, startAtEpoch)
-          case result: Try[OrganizationIdResponse] => noOrgId(result, packageId)
+          case Success(Left(timeSeriesException)) =>
+            complete(timeSeriesException.statusCode -> timeSeriesException.getMessage)
         }
       }
     }
@@ -210,8 +181,11 @@ class WebServer(
     concat(continuousQuery(claim), unitQuery(claim), concat(segmentQuery))
   }
 
-  def discoverValidateMontageRoute(claim: Claim): Route =
+  def discoverValidateMontageRoute(claim: Claim): Route = {
     path("validate-montage") {
+      parameter('package)(discoverValidateMontageRoute(claim))
+    }
+    /* path("validate-montage") {
       parameter('package) { packageId =>
         onComplete(ports.discoverApiClient.getOrganizationId(packageId)) {
           case Success(Id(packageOrgId)) =>
@@ -219,7 +193,8 @@ class WebServer(
           case result: Try[OrganizationIdResponse] => noOrgId(result, packageId)
         }
       }
-    }
+    }*/
+  }
 
   def claimToDiscoverRoutes(claim: Claim): Route = {
     pathPrefix("discover" / "ts") {

@@ -69,6 +69,7 @@ object containers {
     val organization: Organization,
     implicit
     val ec: ExecutionContext,
+    implicit
     val system: ActorSystem
   ) extends ScopedContainer
       with OrganizationContainer

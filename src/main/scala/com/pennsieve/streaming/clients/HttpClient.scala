@@ -47,9 +47,10 @@ object HttpClient {
       for {
         resp <- Http().singleRequest(req)
         body <- resp.entity.toStrict(5.seconds)
+        asString = body.data.utf8String
       } yield
-        if (resp.status.isSuccess()) body.data.utf8String.asRight
-        else HttpError(resp.status, body.data.utf8String).asLeft
+        if (resp.status.isSuccess()) asString.asRight
+        else HttpError(resp.status, asString).asLeft
     }
 
   def apply(
