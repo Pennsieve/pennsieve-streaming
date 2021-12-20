@@ -21,7 +21,7 @@ import com.pennsieve.streaming.server.TimeSeriesException
 
 import scala.concurrent.{ ExecutionContext, Future }
 
-class MockDiscoverApiClient extends DiscoverApiClient {
+class MockDiscoverApiClient(implicit ec: ExecutionContext) extends DiscoverApiClient {
 
   val defaultOrgId = 1
 
@@ -37,14 +37,8 @@ class MockDiscoverApiClient extends DiscoverApiClient {
     response = defaultResponse
   }
 
-  override def getOrganizationId(
-    packageId: String
-  )(implicit
-    ec: ExecutionContext
-  ): EitherT[Future, TimeSeriesException, Int] = {
-    response.fold(EitherT.leftT(_), EitherT.rightT(_))
-
-  }
+  override def getOrganizationId(packageId: String): EitherT[Future, TimeSeriesException, Int] =
+    EitherT.fromEither(response)
 
   /*override def getOrganizationId(
     packageId: String

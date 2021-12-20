@@ -18,8 +18,10 @@ package com.pennsieve.streaming.server
 
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.{ Directives, Route }
-import cats.implicits._
 import com.pennsieve.auth.middleware.Jwt.Claim
+import com.pennsieve.models.Channel
+import com.pennsieve.streaming.TimeSeriesLogContext
+import com.pennsieve.streaming.server.TimeSeriesFlow.WithErrorT
 
 import scala.concurrent.ExecutionContext
 import scala.util.{ Failure, Success }
@@ -27,34 +29,20 @@ import scala.util.{ Failure, Success }
 class MontageValidationService(
   claim: Claim
 )(implicit
-  ports: WebServerPorts,
-  ec: ExecutionContext
+  ports: WebServerPorts
 ) extends Directives
     with TSJsonSupport {
 
-  def route(packageOrgId: Option[Int])(packageId: String): Route =
-    get {
-      onComplete(ports.getChannels(packageId, claim, packageOrgId).value) {
-        case Failure(e) => complete(StatusCodes.InternalServerError, e)
-        case Success(channelsResult) =>
-          channelsResult
-            .flatMap {
-              case (channels, _) =>
-                Montage.validateAllMontages(channels.map(_.name))
-            }
-            .fold(err => complete(err.statusCode, err), _ => complete(StatusCodes.OK))
-      }
-    }
+  private def completeWithError(err: TimeSeriesException): Route = {
+    complete(err.statusCode, err)
+  }
 
-  def discoverRoute(packageId: String): Route = {
-    val forResult = for {
-      packageOrgId <- ports.discoverApiClient.getOrganizationId(packageId)
-      channelsResult <- ports
-        .getChannels(packageId, claim, Some(packageOrgId))
-    } yield channelsResult
+  def getChannelsQuery(packageId: String): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
+    ports.getChannels(packageId, claim)
 
+  def route(packageId: String): Route = {
     get {
-      onComplete(forResult.value) {
+      onComplete(getChannelsQuery(packageId).value) {
         case Failure(e) => complete(StatusCodes.InternalServerError, e)
         case Success(channelsResult) =>
           channelsResult
@@ -66,5 +54,4 @@ class MontageValidationService(
       }
     }
   }
-
 }

@@ -31,11 +31,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 
 trait DiscoverApiClient {
 
-  def getOrganizationId(
-    packageId: String
-  )(implicit
-    ec: ExecutionContext
-  ): EitherT[Future, TimeSeriesException, Int]
+  def getOrganizationId(packageId: String): EitherT[Future, TimeSeriesException, Int]
 
   def extractOrganizationId(
     packageId: String
@@ -50,13 +46,14 @@ trait DiscoverApiClient {
   }
 }
 
-class DiscoverApiClientImpl(host: String, httpClient: HttpClient) extends DiscoverApiClient {
+class DiscoverApiClientImpl(
+  host: String,
+  httpClient: HttpClient
+)(implicit
+  ec: ExecutionContext
+) extends DiscoverApiClient {
 
-  override def getOrganizationId(
-    packageId: String
-  )(implicit
-    ec: ExecutionContext
-  ): EitherT[Future, TimeSeriesException, Int] = {
+  override def getOrganizationId(packageId: String): EitherT[Future, TimeSeriesException, Int] = {
     val request =
       HttpRequest(uri = s"$host/packages/$packageId/files", method = HttpMethods.GET)
     val page = httpClient(request)

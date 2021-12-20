@@ -75,7 +75,7 @@ class WebServerSpec
       val packageId = ports.MontagePackage
 
       Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(ownerClaim)
-        .route(None)(packageId) ~> check {
+        .route(packageId) ~> check {
         status should be(StatusCodes.OK)
       }
     }
@@ -96,7 +96,7 @@ class WebServerSpec
         Jwt.generateClaim(UserClaim(UserId(userId), List(organization, dataset)), 1 minute)
 
       Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(claim)
-        .route(None)(packageId) ~> check {
+        .route(packageId) ~> check {
         status should be(StatusCodes.BadRequest)
         responseAs[TimeSeriesException] should be(
           TimeSeriesException.UnexpectedError(

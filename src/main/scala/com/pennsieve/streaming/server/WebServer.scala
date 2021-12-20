@@ -144,11 +144,11 @@ class WebServer(
   val unitQuery: ClaimToRoute =
     claim => new UnitQueryService(querySequencer, queryLimit, claim).route
 
-  val validateMontage: Claim => Option[Int] => String => Route =
+  val validateMontage: Claim => String => Route =
     claim => new MontageValidationService(claim).route _
 
   val discoverValidateMontageRoute: Claim => String => Route =
-    claim => new MontageValidationService(claim).discoverRoute _
+    claim => new DiscoverMontageValidationService(claim).route _
 
   def claimToRoutes(claim: Claim): Route = {
     concat(
@@ -159,7 +159,7 @@ class WebServer(
         }, pathPrefix("retrieve") {
           retrieveRoutes(claim)
         }, path("validate-montage") {
-          parameter('package)(validateMontage(claim)(None))
+          parameter('package)(validateMontage(claim))
         })
       }
     )
