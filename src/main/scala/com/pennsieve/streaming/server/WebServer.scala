@@ -185,15 +185,6 @@ class WebServer(
     path("validate-montage") {
       parameter('package)(discoverValidateMontageRoute(claim))
     }
-    /* path("validate-montage") {
-      parameter('package) { packageId =>
-        onComplete(ports.discoverApiClient.getOrganizationId(packageId)) {
-          case Success(Id(packageOrgId)) =>
-            validateMontage(claim)(Some(packageOrgId))(packageId)
-          case result: Try[OrganizationIdResponse] => noOrgId(result, packageId)
-        }
-      }
-    }*/
   }
 
   def claimToDiscoverRoutes(claim: Claim): Route = {
