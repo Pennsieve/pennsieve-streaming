@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.pennsieve.streaming.server
+package com.pennsieve.streaming.server.discover
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.StatusCodes
@@ -31,12 +31,13 @@ import com.pennsieve.models.Role
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.{ LocalFilesystemWsClient, WsClient }
 import com.pennsieve.streaming.server.TSJsonSupport._
+import com.pennsieve.streaming.server._
 import com.pennsieve.streaming.{ SessionGenerator, TestConfig, TestDatabase, TimeSeriesMessage }
 import org.scalatest.{ fixture, Inspectors, Matchers }
 import shapeless.syntax.inject._
 import spray.json._
 
-import scala.concurrent.duration.{ DurationInt, DurationLong }
+import scala.concurrent.duration.DurationInt
 import scala.util.Random
 
 class WebServerDiscoverRoutesSpec
@@ -69,10 +70,10 @@ class WebServerDiscoverRoutesSpec
     Jwt.generateClaim(UserClaim(UserId(userId), List(organizationRole, datasetRole)), 1 minute)
 
   private val ownerToken = Jwt.generateToken(ownerClaim)
-  /*import scala.concurrent.duration._
+  import scala.concurrent.duration._
   implicit def default(implicit system: ActorSystem) =
-    RouteTestTimeout(new DurationInt(5).second.dilated(system))
-   */
+    RouteTestTimeout(new DurationInt(3).second.dilated(system))
+
   "montage validation route" should {
     "validate a montage that contains all correct channels" in { implicit dbSession =>
       val packageId = ports.MontagePackage

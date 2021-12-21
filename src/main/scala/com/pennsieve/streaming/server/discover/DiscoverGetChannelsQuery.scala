@@ -14,30 +14,26 @@
  * limitations under the License.
  */
 
-package com.pennsieve.streaming.server
+package com.pennsieve.streaming.server.discover
 
-import cats.implicits._
-import com.pennsieve.auth.middleware.Jwt.Claim
+import com.pennsieve.auth.middleware.Jwt
 import com.pennsieve.models.Channel
 import com.pennsieve.streaming.TimeSeriesLogContext
 import com.pennsieve.streaming.server.TimeSeriesFlow.WithErrorT
+import com.pennsieve.streaming.server.{ GetChannelsQuery, WebServerPorts }
+import cats.implicits._
 
 import scala.concurrent.ExecutionContext
 
-class DiscoverMontageValidationService(
-  claim: Claim
-)(implicit
-  ports: WebServerPorts,
-  ec: ExecutionContext
-) extends MontageValidationService(claim)(ports) {
-
-  override def getChannelsQuery(
-    packageId: String
+class DiscoverGetChannelsQuery(implicit ports: WebServerPorts, ec: ExecutionContext)
+    extends GetChannelsQuery {
+  override def query(
+    packageId: String,
+    claim: Jwt.Claim
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
     for {
       packageOrgId <- ports.discoverApiClient.getOrganizationId(packageId)
       channelsResult <- ports
         .getChannels(packageId, claim, Some(packageOrgId))
     } yield channelsResult
-
 }

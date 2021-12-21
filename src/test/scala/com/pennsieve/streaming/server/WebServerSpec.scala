@@ -74,8 +74,8 @@ class WebServerSpec
     "validate a montage that contains all correct channels" in { _ =>
       val packageId = ports.MontagePackage
 
-      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(ownerClaim)
-        .route(packageId) ~> check {
+      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService()
+        .route(ownerClaim, new GetChannelsQueryImpl())(packageId) ~> check {
         status should be(StatusCodes.OK)
       }
     }
@@ -95,8 +95,8 @@ class WebServerSpec
       val claim: Claim =
         Jwt.generateClaim(UserClaim(UserId(userId), List(organization, dataset)), 1 minute)
 
-      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService(claim)
-        .route(packageId) ~> check {
+      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService()
+        .route(claim, new GetChannelsQueryImpl())(packageId) ~> check {
         status should be(StatusCodes.BadRequest)
         responseAs[TimeSeriesException] should be(
           TimeSeriesException.UnexpectedError(

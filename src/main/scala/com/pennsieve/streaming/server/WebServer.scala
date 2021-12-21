@@ -31,6 +31,7 @@ import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.{ QuerySequencer, WsClient }
 import com.pennsieve.streaming.server.TSJsonSupport._
 import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage }
+import com.pennsieve.streaming.server.discover.DiscoverGetChannelsQuery
 import com.pennsieve.streaming.{ RangeLookUp, UnitRangeLookUp }
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
@@ -38,7 +39,6 @@ import uk.me.berndporr.iirj.Cascade
 
 import scala.collection.JavaConverters._
 import scala.collection.concurrent
-import scala.util.Success
 
 class WebServer(
   implicit
@@ -81,14 +81,17 @@ class WebServer(
   val querySequencer =
     new QuerySequencer(rangeLookUp, unitRangeLookUp)
 
+  val getChannelsQuery: GetChannelsQuery = new GetChannelsQueryImpl()
+  val discoverGetChannelsQuery: GetChannelsQuery = new DiscoverGetChannelsQuery()
+
   def timeseriesQuery(
     claim: Claim,
-    packageOrgId: Option[Int] = None
+    getChannelsQuery: GetChannelsQuery
   )(
     packageId: String,
     startAtEpochParam: Option[String]
   ): Route = {
-    val flow = ports.getChannels(packageId, claim, packageOrgId).map {
+    val flow = getChannelsQuery.query(packageId, claim).map {
       case (channels, logContext) =>
         val cmap = channels.map { c =>
           c.nodeId -> c
@@ -144,57 +147,42 @@ class WebServer(
   val unitQuery: ClaimToRoute =
     claim => new UnitQueryService(querySequencer, queryLimit, claim).route
 
-  val validateMontage: Claim => String => Route =
-    claim => new MontageValidationService(claim).route _
-
-  val discoverValidateMontageRoute: Claim => String => Route =
-    claim => new DiscoverMontageValidationService(claim).route _
+  val validateMontage: MontageValidationService = new MontageValidationService()
 
   def claimToRoutes(claim: Claim): Route = {
-    concat(
-      claimToDiscoverRoutes(claim),
-      pathPrefix("ts") {
-        concat(path("query") {
-          parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim))
-        }, pathPrefix("retrieve") {
-          retrieveRoutes(claim)
-        }, path("validate-montage") {
-          parameter('package)(validateMontage(claim))
-        })
-      }
-    )
+    concat(claimToDiscoverRoutes(claim), pathPrefix("ts") {
+      claimToTimeSeriesRoutes(claim, getChannelsQuery)
+    })
   }
 
-  def discoverQueryRoute(claim: Claim): Route =
+  def queryRoute(claim: Claim, getChannelsQuery: GetChannelsQuery): Route =
     path("query") {
-      parameter('package, 'startAtEpoch ?) { (packageId, startAtEpoch) =>
-        onComplete(ports.discoverApiClient.getOrganizationId(packageId).value) {
-          case Success(Right(orgId)) =>
-            timeseriesQuery(claim, Some(orgId))(packageId, startAtEpoch)
-          case Success(Left(timeSeriesException)) =>
-            complete(timeSeriesException.statusCode -> timeSeriesException.getMessage)
-        }
-      }
+      parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim, getChannelsQuery))
     }
 
   def retrieveRoutes(claim: Claim): Route = {
     concat(continuousQuery(claim), unitQuery(claim), concat(segmentQuery))
   }
 
-  def discoverValidateMontageRoute(claim: Claim): Route = {
+  def validateMontageRoute(claim: Claim, getChannelsQuery: GetChannelsQuery): Route = {
     path("validate-montage") {
-      parameter('package)(discoverValidateMontageRoute(claim))
+      parameter('package)(validateMontage.route(claim, getChannelsQuery))
     }
   }
 
   def claimToDiscoverRoutes(claim: Claim): Route = {
     pathPrefix("discover" / "ts") {
-      concat(
-        discoverQueryRoute(claim),
-        pathPrefix("retrieve")(retrieveRoutes(claim)),
-        discoverValidateMontageRoute(claim)
-      )
+      claimToTimeSeriesRoutes(claim, discoverGetChannelsQuery)
     }
+  }
+
+  def claimToTimeSeriesRoutes(claim: Claim, getChannelsQuery: GetChannelsQuery): Route = {
+    concat(
+      queryRoute(claim, getChannelsQuery),
+      pathPrefix("retrieve")(retrieveRoutes(claim)),
+      validateMontageRoute(claim, getChannelsQuery)
+    )
+
   }
 
   def noClaimRoutes(): Route =

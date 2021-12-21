@@ -19,30 +19,15 @@ package com.pennsieve.streaming.server
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.{ Directives, Route }
 import com.pennsieve.auth.middleware.Jwt.Claim
-import com.pennsieve.models.Channel
-import com.pennsieve.streaming.TimeSeriesLogContext
-import com.pennsieve.streaming.server.TimeSeriesFlow.WithErrorT
+import com.pennsieve.streaming.server.TSJsonSupport._
 
-import scala.concurrent.ExecutionContext
 import scala.util.{ Failure, Success }
 
-class MontageValidationService(
-  claim: Claim
-)(implicit
-  ports: WebServerPorts
-) extends Directives
-    with TSJsonSupport {
+class MontageValidationService extends Directives with TSJsonSupport {
 
-  private def completeWithError(err: TimeSeriesException): Route = {
-    complete(err.statusCode, err)
-  }
-
-  def getChannelsQuery(packageId: String): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
-    ports.getChannels(packageId, claim)
-
-  def route(packageId: String): Route = {
+  def route(claim: Claim, getChannelsQuery: GetChannelsQuery)(packageId: String): Route = {
     get {
-      onComplete(getChannelsQuery(packageId).value) {
+      onComplete(getChannelsQuery.query(packageId, claim).value) {
         case Failure(e) => complete(StatusCodes.InternalServerError, e)
         case Success(channelsResult) =>
           channelsResult
