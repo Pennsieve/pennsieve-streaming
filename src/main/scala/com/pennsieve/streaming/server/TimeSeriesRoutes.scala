@@ -84,9 +84,10 @@ class TimeSeriesRoutes(
   }
 
   def routes(claim: Claim): Route = {
-    concat(pathPrefix("discover" / "ts") {
-      claimToTimeSeriesRoutes(claim, discoverGetChannelsQuery)
-    }, pathPrefix("ts") { claimToTimeSeriesRoutes(claim, getChannelsQuery) })
+    concat(
+      pathPrefix("discover" / "ts")(claimToTimeSeriesRoutes(claim, discoverGetChannelsQuery)),
+      pathPrefix("ts")(claimToTimeSeriesRoutes(claim, getChannelsQuery))
+    )
   }
 
   def getConnectionCount: Long = timeSeriesQueryService.getConnectionCount
