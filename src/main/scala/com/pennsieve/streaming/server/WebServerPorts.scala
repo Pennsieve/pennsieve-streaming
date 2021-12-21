@@ -52,7 +52,7 @@ trait WebServerPorts {
     claim: Jwt.Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)]
 
-  def discoverApiClient: DiscoverApiClient
+  def getDiscoverApiClient(): DiscoverApiClient
 
   val rangeLookupQuery =
     "select id, location, channel, rate, lower(range) as lo, upper(range) as hi from timeseries.ranges where (channel = {channel}) and (range && int8range({qstart},{qend})) order by lo asc"
@@ -74,11 +74,13 @@ class GraphWebServerPorts(
 ) extends WebServerPorts {
   private val insecureContainer =
     new InsecureAWSContainer(config, ec, system) with InsecureCoreContainer
+  private val discoverApiClient =
+    new DiscoverApiClientImpl(config.getString("discover-api.host"), HttpClient())
 
   implicit val jwtConfig: Jwt.Config = getJwtConfig(config)
 
-  override val discoverApiClient =
-    new DiscoverApiClientImpl(config.getString("discover-api.host"), HttpClient())
+  override def getDiscoverApiClient() =
+    discoverApiClient
 
   private def lookupOrg(orgId: Option[Int]): EitherT[Future, CoreError, Option[Organization]] = {
     if (orgId.isDefined)

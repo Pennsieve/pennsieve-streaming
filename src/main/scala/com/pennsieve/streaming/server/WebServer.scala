@@ -29,6 +29,8 @@ import com.pennsieve.streaming.server.TSJsonSupport._
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 
+import scala.concurrent.ExecutionContext
+
 class WebServer(
   implicit
   log: ContextLogger,
@@ -42,9 +44,9 @@ class WebServer(
 
   implicit val jwtConfig: Jwt.Config = getJwtConfig(config)
 
-  implicit val ec = system.dispatchers.lookup("custom-io-dispatcher")
+  implicit val ec: ExecutionContext = system.dispatchers.lookup("custom-io-dispatcher")
 
-  val startupTime = System.currentTimeMillis()
+  val startupTime: Long = System.currentTimeMillis()
 
   val timeSeriesRoutes: TimeSeriesRoutes = new TimeSeriesRoutes()
 

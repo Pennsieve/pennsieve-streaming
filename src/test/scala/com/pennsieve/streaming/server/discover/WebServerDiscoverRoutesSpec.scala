@@ -29,6 +29,7 @@ import com.pennsieve.auth.middleware.{ DatasetId, Jwt, OrganizationId, UserClaim
 import com.pennsieve.core.utilities.JwtAuthenticator._
 import com.pennsieve.models.Role
 import com.pennsieve.service.utilities.ContextLogger
+import com.pennsieve.streaming.clients.MockDiscoverApiClient
 import com.pennsieve.streaming.query.{ LocalFilesystemWsClient, WsClient }
 import com.pennsieve.streaming.server.TSJsonSupport._
 import com.pennsieve.streaming.server._
@@ -55,6 +56,9 @@ class WebServerDiscoverRoutesSpec
   implicit val jwtConfig: Jwt.Config = new Jwt.Config {
     override def key: String = config.getString("jwt-key")
   }
+  implicit def default(implicit system: ActorSystem): RouteTestTimeout =
+    RouteTestTimeout(new DurationInt(3).second.dilated(system))
+
   private val userId = 1
   private val organizationId = 1
   private val datasetId = 1
@@ -70,14 +74,12 @@ class WebServerDiscoverRoutesSpec
     Jwt.generateClaim(UserClaim(UserId(userId), List(organizationRole, datasetRole)), 1 minute)
 
   private val ownerToken = Jwt.generateToken(ownerClaim)
-  import scala.concurrent.duration._
-  implicit def default(implicit system: ActorSystem) =
-    RouteTestTimeout(new DurationInt(3).second.dilated(system))
 
   "montage validation route" should {
     "validate a montage that contains all correct channels" in { implicit dbSession =>
       val packageId = ports.MontagePackage
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
+      ports.getDiscoverApiClient().asInstanceOf[MockDiscoverApiClient].setResponse(Right(2))
 
       Get(s"/discover/ts/validate-montage?package=$packageId") ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         status should be(StatusCodes.OK)
@@ -87,7 +89,6 @@ class WebServerDiscoverRoutesSpec
     "invalidate a montage that is missing required channels" in { implicit dbSession =>
       val packageId = ports.InvalidMontagePackage
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
-
       Get(s"/discover/ts/validate-montage?package=$packageId") ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         status should be(StatusCodes.BadRequest)
         responseAs[TimeSeriesException] should be(

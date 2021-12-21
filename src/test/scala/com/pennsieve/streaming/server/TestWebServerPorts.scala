@@ -165,5 +165,7 @@ class TestWebServerPorts extends WebServerPorts {
   def parseProtobufFromMessage[A](parse: Array[Byte] => A)(message: Message): A =
     parse(message.asBinaryMessage.getStrictData.toArray)
 
-  override def discoverApiClient: DiscoverApiClient = new MockDiscoverApiClient()
+  private val discoverApiClient: DiscoverApiClient = new MockDiscoverApiClient
+
+  override def getDiscoverApiClient(): DiscoverApiClient = discoverApiClient
 }

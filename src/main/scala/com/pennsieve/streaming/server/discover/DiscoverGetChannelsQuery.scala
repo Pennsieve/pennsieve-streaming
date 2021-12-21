@@ -32,7 +32,7 @@ class DiscoverGetChannelsQuery(implicit ports: WebServerPorts, ec: ExecutionCont
     claim: Jwt.Claim
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
     for {
-      packageOrgId <- ports.discoverApiClient.getOrganizationId(packageId)
+      packageOrgId <- ports.getDiscoverApiClient().getOrganizationId(packageId)
       channelsResult <- ports
         .getChannels(packageId, claim, Some(packageOrgId))
     } yield channelsResult

@@ -40,11 +40,4 @@ class MockDiscoverApiClient(implicit ec: ExecutionContext) extends DiscoverApiCl
   override def getOrganizationId(packageId: String): EitherT[Future, TimeSeriesException, Int] =
     EitherT.fromEither(response)
 
-  /*override def getOrganizationId(
-    packageId: String
-  )(implicit
-    ec: ExecutionContext
-  ): Future[OrganizationIdResponse] = Future.successful(Id(1))
-
- */
 }
