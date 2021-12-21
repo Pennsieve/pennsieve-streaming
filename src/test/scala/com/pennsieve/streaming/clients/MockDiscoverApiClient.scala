@@ -23,7 +23,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 
 class MockDiscoverApiClient(implicit ec: ExecutionContext) extends DiscoverApiClient {
 
-  val defaultOrgId = 1
+  val defaultOrgId = 11
 
   val defaultResponse: Right[TimeSeriesException, Int] = Right(defaultOrgId)
 
@@ -39,5 +39,4 @@ class MockDiscoverApiClient(implicit ec: ExecutionContext) extends DiscoverApiCl
 
   override def getOrganizationId(packageId: String): EitherT[Future, TimeSeriesException, Int] =
     EitherT.fromEither(response)
-
 }
