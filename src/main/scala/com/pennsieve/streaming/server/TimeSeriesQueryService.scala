@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021 University of Pennsylvania
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pennsieve.streaming.server
 
 import akka.actor.ActorSystem
@@ -21,12 +37,7 @@ import scala.collection.concurrent
 import scala.concurrent.ExecutionContext
 
 class TimeSeriesQueryService(
-  sessionFilters: SessionFilters,
-  sessionMontages: SessionMontage,
-  rangeLookUp: RangeLookUp,
-  unitRangeLookUp: UnitRangeLookUp,
-  connectionCounter: AtomicLong
-)(implicit
+  implicit
   log: ContextLogger,
   ports: WebServerPorts,
   system: ActorSystem,
@@ -37,6 +48,26 @@ class TimeSeriesQueryService(
 ) {
 
   val jwtConfig: Jwt.Config = getJwtConfig(config)
+
+  val connectionCounter: AtomicLong = new AtomicLong()
+
+  def getConnectionCount: Long = connectionCounter.get()
+
+  // A global map of session ids to filters that are active on
+  // specific channels during that session
+  val sessionFilters: SessionFilters =
+    new ConcurrentHashMap[String, concurrent.Map[String, Cascade]]().asScala
+
+  // A global map of session ids to the montages that are active on
+  // specific packages during that session
+  val sessionMontages: SessionMontage =
+    new ConcurrentHashMap[String, concurrent.Map[String, MontageType]]().asScala
+
+  val rangeLookUp =
+    new RangeLookUp(ports.rangeLookupQuery, config.getString("timeseries.s3-base-url"))
+
+  val unitRangeLookUp =
+    new UnitRangeLookUp(ports.unitRangeLookupQuery, config.getString("timeseries.s3-base-url"))
 
   def route(
     claim: Claim,

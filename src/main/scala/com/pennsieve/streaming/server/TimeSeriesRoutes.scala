@@ -17,12 +17,11 @@
 package com.pennsieve.streaming.server
 
 import akka.actor.ActorSystem
-import akka.http.scaladsl.server.Directives.{ _symbol2NR, concat, parameter, path, pathPrefix }
-import akka.http.scaladsl.server.Route
+import akka.http.scaladsl.server.{ Directives, Route }
 import com.pennsieve.auth.middleware.Jwt.Claim
 import com.pennsieve.service.utilities.ContextLogger
-import com.pennsieve.streaming.{ RangeLookUp, UnitRangeLookUp }
 import com.pennsieve.streaming.query.{ QuerySequencer, WsClient }
+import com.pennsieve.streaming.server.discover.DiscoverGetChannelsQuery
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 
@@ -37,42 +36,33 @@ class TimeSeriesRoutes(
   config: Config,
   dbSession: DBSession,
   ec: ExecutionContext
-) {
+) extends Directives {
 
-  val queryLimit = config.getLong("timeseries.query-limit")
+  val queryLimit: Long = config.getLong("timeseries.query-limit")
 
-  val defaultGapThreshold = config.getDouble("timeseries.default-gap-threshold")
+  val defaultGapThreshold: Double = config.getDouble("timeseries.default-gap-threshold")
 
-  val rangeLookUp =
-    new RangeLookUp(ports.rangeLookupQuery, config.getString("timeseries.s3-base-url"))
+  val timeSeriesQueryService: TimeSeriesQueryService = new TimeSeriesQueryService()
 
-  val unitRangeLookUp =
-    new UnitRangeLookUp(ports.unitRangeLookupQuery, config.getString("timeseries.s3-base-url"))
   val querySequencer =
-    new QuerySequencer(rangeLookUp, unitRangeLookUp)
+    new QuerySequencer(timeSeriesQueryService.rangeLookUp, timeSeriesQueryService.unitRangeLookUp)
 
   type ClaimToRoute = Claim => Route
 
   val segmentQuery: Route =
-    new SegmentService(rangeLookUp, defaultGapThreshold).route
+    new SegmentService(timeSeriesQueryService.rangeLookUp, defaultGapThreshold).route
   val continuousQuery: ClaimToRoute =
     claim => new ContinuousQueryService(querySequencer, queryLimit, claim).route
   val unitQuery: ClaimToRoute =
     claim => new UnitQueryService(querySequencer, queryLimit, claim).route
 
   val validateMontage: MontageValidationService = new MontageValidationService()
-
-  def timeseriesQuery(
-    claim: Claim,
-    getChannelsQuery: GetChannelsQuery
-  )(
-    packageId: String,
-    startAtEpoch: Option[String]
-  ): Route = ???
+  val getChannelsQuery: GetChannelsQuery = new GetChannelsQueryImpl()
+  val discoverGetChannelsQuery: GetChannelsQuery = new DiscoverGetChannelsQuery()
 
   def queryRoute(claim: Claim, getChannelsQuery: GetChannelsQuery): Route =
     path("query") {
-      parameter('package, 'startAtEpoch ?)(timeseriesQuery(claim, getChannelsQuery))
+      parameter('package, 'startAtEpoch ?)(timeSeriesQueryService.route(claim, getChannelsQuery))
     }
 
   def retrieveRoutes(claim: Claim): Route = {
@@ -92,4 +82,12 @@ class TimeSeriesRoutes(
       validateMontageRoute(claim, getChannelsQuery)
     )
   }
+
+  def routes(claim: Claim): Route = {
+    concat(pathPrefix("discover" / "ts") {
+      claimToTimeSeriesRoutes(claim, discoverGetChannelsQuery)
+    }, pathPrefix("ts") { claimToTimeSeriesRoutes(claim, getChannelsQuery) })
+  }
+
+  def getConnectionCount: Long = timeSeriesQueryService.getConnectionCount
 }
