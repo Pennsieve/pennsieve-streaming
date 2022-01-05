@@ -14,46 +14,53 @@
  * limitations under the License.
  */
 
-package com.pennsieve.streaming.server
+package com.pennsieve.streaming.server.discover
 
+import akka.actor.ActorSystem
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.model.StatusCodes.Unauthorized
 import akka.http.scaladsl.model.headers.{ Authorization, OAuth2BearerToken }
 import akka.http.scaladsl.model.ws.{ BinaryMessage, TextMessage }
-import akka.http.scaladsl.testkit.{ ScalatestRouteTest, WSProbe }
+import akka.http.scaladsl.testkit.{ RouteTestTimeout, ScalatestRouteTest, WSProbe }
+import akka.testkit.TestDuration
 import com.pennsieve.auth.middleware.Jwt.Claim
 import com.pennsieve.auth.middleware.Jwt.Role.RoleIdentifier
 import com.pennsieve.auth.middleware.{ DatasetId, Jwt, OrganizationId, UserClaim, UserId }
 import com.pennsieve.core.utilities.JwtAuthenticator._
 import com.pennsieve.models.Role
 import com.pennsieve.service.utilities.ContextLogger
-import com.pennsieve.streaming.query.LocalFilesystemWsClient
+import com.pennsieve.streaming.clients.{ HttpError, MockDiscoverApiClient }
+import com.pennsieve.streaming.query.{ LocalFilesystemWsClient, WsClient }
 import com.pennsieve.streaming.server.TSJsonSupport._
-import com.pennsieve.streaming.{ SessionGenerator, TestConfig, TestDatabase }
-import com.pennsieve.streaming.TimeSeriesMessage
-import org.scalatest.{ Inspectors, Matchers }
-import org.scalatest.fixture.WordSpec
+import com.pennsieve.streaming.server.TimeSeriesException.{ DiscoverApiError, NotTimeSeries }
+import com.pennsieve.streaming.server._
+import com.pennsieve.streaming.{ SessionGenerator, TestConfig, TestDatabase, TimeSeriesMessage }
+import org.scalatest.{ fixture, BeforeAndAfter, Inspectors, Matchers }
 import shapeless.syntax.inject._
 import spray.json._
 
-import scala.concurrent.duration.DurationLong
+import scala.concurrent.duration.DurationInt
 import scala.util.Random
 
-class WebServerSpec
-    extends WordSpec
+class WebServerDiscoverRoutesSpec
+    extends fixture.WordSpec
     with Matchers
     with Inspectors
     with ScalatestRouteTest
     with TestDatabase
     with TestConfig
     with SessionGenerator
-    with TSJsonSupport {
-  implicit val log = new ContextLogger()
-  implicit val wsClient = new LocalFilesystemWsClient
-  implicit val ports = new TestWebServerPorts
+    with TSJsonSupport
+    with BeforeAndAfter {
+  implicit val log: ContextLogger = new ContextLogger()
+  implicit val wsClient: WsClient = new LocalFilesystemWsClient
+  implicit val ports: TestWebServerPorts = new TestWebServerPorts
   implicit val jwtConfig: Jwt.Config = new Jwt.Config {
     override def key: String = config.getString("jwt-key")
   }
+  implicit def default(implicit system: ActorSystem): RouteTestTimeout =
+    RouteTestTimeout(new DurationInt(3).second.dilated(system))
+
   private val userId = 1
   private val organizationId = 1
   private val datasetId = 1
@@ -70,33 +77,28 @@ class WebServerSpec
 
   private val ownerToken = Jwt.generateToken(ownerClaim)
 
-  "montage validation route" should {
-    "validate a montage that contains all correct channels" in { _ =>
-      val packageId = ports.MontagePackage
+  after {
+    ports.getDiscoverApiClient().asInstanceOf[MockDiscoverApiClient].resetResponse()
+  }
 
-      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService()
-        .route(ownerClaim, new GetChannelsQueryImpl())(packageId) ~> check {
+  "montage validation route" should {
+    "validate a montage that contains all correct channels" in { implicit dbSession =>
+      val packageId = ports.MontagePackage
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+      ports
+        .getDiscoverApiClient()
+        .asInstanceOf[MockDiscoverApiClient]
+        .setResponse(Right(3))
+
+      Get(s"/discover/ts/validate-montage?package=$packageId") ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         status should be(StatusCodes.OK)
       }
     }
 
-    "invalidate a montage that is missing required channels" in { _ =>
+    "invalidate a montage that is missing required channels" in { implicit dbSession =>
       val packageId = ports.InvalidMontagePackage
-
-      val organization: Jwt.Role = Jwt.OrganizationRole(
-        OrganizationId(organizationId)
-          .inject[RoleIdentifier[OrganizationId]],
-        Role.Owner
-      )
-
-      val dataset: Jwt.Role =
-        Jwt.DatasetRole(DatasetId(datasetId).inject[RoleIdentifier[DatasetId]], Role.Owner)
-
-      val claim: Claim =
-        Jwt.generateClaim(UserClaim(UserId(userId), List(organization, dataset)), 1 minute)
-
-      Get(s"/ts/validate-montage?package=$packageId") ~> new MontageValidationService()
-        .route(claim, new GetChannelsQueryImpl())(packageId) ~> check {
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+      Get(s"/discover/ts/validate-montage?package=$packageId") ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         status should be(StatusCodes.BadRequest)
         responseAs[TimeSeriesException] should be(
           TimeSeriesException.UnexpectedError(
@@ -106,6 +108,41 @@ class WebServerSpec
         )
       }
     }
+
+    "return the correct error if the package is not a time series" in { implicit dbSession =>
+      val packageId = "not-a-time-series"
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+      ports
+        .getDiscoverApiClient()
+        .asInstanceOf[MockDiscoverApiClient]
+        .setResponse(Left(NotTimeSeries(packageId)))
+
+      Get(s"/discover/ts/validate-montage?package=$packageId") ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
+        status should be(StatusCodes.BadRequest)
+        responseAs[TimeSeriesException] should be(
+          TimeSeriesException.UnexpectedError("not-a-time-series is not a time series package", Nil)
+        )
+      }
+    }
+
+    "return the correct error if the package is not in the discover database" in {
+      implicit dbSession =>
+        val packageId = "not-in-discover"
+        val tokenHeader = OAuth2BearerToken(ownerToken.value)
+        val underlyingHttpError = HttpError(StatusCodes.NotFound, s"Not found: ($packageId)")
+        ports
+          .getDiscoverApiClient()
+          .asInstanceOf[MockDiscoverApiClient]
+          .setResponse(Left(DiscoverApiError(underlyingHttpError)))
+
+        Get(s"/discover/ts/validate-montage?package=$packageId") ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
+          status should be(underlyingHttpError.statusCode)
+          responseAs[TimeSeriesException] should be(
+            TimeSeriesException.UnexpectedError(underlyingHttpError.getMessage, Nil)
+          )
+        }
+    }
+
   }
 
   "timeseries flow route" should {
@@ -116,7 +153,7 @@ class WebServerSpec
 
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=$packageId"
+      val url = s"/discover/ts/query?package=$packageId"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -150,7 +187,7 @@ class WebServerSpec
 
         val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-        val url = s"/ts/query?package=${packageId}&startAtEpoch=true"
+        val url = s"/discover/ts/query?package=$packageId&startAtEpoch=true"
         WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
           isWebSocketUpgrade shouldEqual true
 
@@ -213,7 +250,7 @@ class WebServerSpec
 
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=${packageId}&startAtEpoch=true"
+      val url = s"/discover/ts/query?package=$packageId&startAtEpoch=true"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -289,7 +326,7 @@ class WebServerSpec
       val testClient = WSProbe()
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=${packageId}"
+      val url = s"/discover/ts/query?package=$packageId"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -323,12 +360,12 @@ class WebServerSpec
     }
 
     "return a montaged data flow when a montage has been applied" in { implicit dbSession =>
-      val montagePackage = ports.MontagePackage
+      val montagedPackage = ports.MontagePackage
 
       val testClient = WSProbe()
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=${montagePackage}"
+      val url = s"/discover/ts/query?package=$montagedPackage"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -347,14 +384,14 @@ class WebServerSpec
                 .right
                 .get
             val (virtualId, _) = ports.MontageMap.toList.find {
-              case (id @ _, name) => name == leadChannel
+              case (_, name) => name == leadChannel
             }.get
             VirtualChannel(id = virtualId, name = virtualName)
           }
 
         val timeSeriesRequest = TextMessage(
           TimeSeriesRequest(
-            packageId = montagePackage,
+            packageId = montagedPackage,
             virtualChannels = Some(virtualChannelsToRequest),
             startTime = 0,
             endTime = 100,
@@ -384,7 +421,7 @@ class WebServerSpec
         // A message should be returned for each montage pair. These
         // messages could come in any order.
         val montagedChannels =
-          for (_ <- Range(0, virtualChannelsToRequest.length))
+          for (_ <- virtualChannelsToRequest.indices)
             yield {
               testClient.expectMessage() match {
                 case TextMessage.Strict(error) =>
@@ -413,8 +450,8 @@ class WebServerSpec
         }
         val ids = montagedChannels.map(_.segment.get.source)
 
-        names should contain theSameElementsAs (virtualChannelsToRequest.map(_.name))
-        ids should contain theSameElementsAs (virtualChannelsToRequest.map(_.id))
+        names should contain theSameElementsAs virtualChannelsToRequest.map(_.name)
+        ids should contain theSameElementsAs virtualChannelsToRequest.map(_.id)
       }
     }
 
@@ -424,7 +461,7 @@ class WebServerSpec
       val testClient = WSProbe()
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=${`package`}"
+      val url = s"/discover/ts/query?package=${`package`}"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -453,12 +490,12 @@ class WebServerSpec
       val testClient = WSProbe()
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=${`package`}"
+      val url = s"/discover/ts/query?package=${`package`}"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
         val keepAlive =
-          TextMessage(new KeepAlive().toJson.toString)
+          TextMessage(KeepAlive().toJson.toString)
 
         testClient.sendMessage(keepAlive)
 
@@ -473,7 +510,7 @@ class WebServerSpec
       val testClient = WSProbe()
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=$montagePackage"
+      val url = s"/discover/ts/query?package=$montagePackage"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -495,9 +532,8 @@ class WebServerSpec
         tse.reason should be(
           """This package is missing channels that are required for the "REFERENTIAL_VS_CZ" montage"""
         )
-        tse.channelNames should contain theSameElementsAs (
-          MontageType.ReferentialVsCz.distinctValues
-        )
+        tse.channelNames should contain theSameElementsAs MontageType.ReferentialVsCz.distinctValues
+
       }
     }
 
@@ -514,7 +550,7 @@ class WebServerSpec
           }
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=$montagePackage"
+      val url = s"/discover/ts/query?package=$montagePackage"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -545,7 +581,7 @@ class WebServerSpec
 
       val tokenHeader = OAuth2BearerToken(ownerToken.value)
 
-      val url = s"/ts/query?package=$packageId"
+      val url = s"/discover/ts/query?package=$packageId"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         isWebSocketUpgrade shouldEqual true
 
@@ -582,21 +618,53 @@ class WebServerSpec
 
       val tokenHeader = OAuth2BearerToken(token.value)
 
-      val url = s"/ts/query?package=$packageId"
+      val url = s"/discover/ts/query?package=$packageId"
       WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
         status shouldBe Unauthorized
       }
     }
-  }
 
-  "health check route" should {
-    "work without a JWT" in { implicit dbSession =>
-      Get("/ts/health") ~> new WebServer().route ~> check {
-        status should be(StatusCodes.OK)
-        responseAs[HealthCheck].connections should be(0)
+    "return bad request for a non-time series package" in { implicit dbSession =>
+      val packageId = "not-a-time-series"
+      ports
+        .getDiscoverApiClient()
+        .asInstanceOf[MockDiscoverApiClient]
+        .setResponse(Left(NotTimeSeries(packageId)))
+
+      val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+
+      val url = s"/discover/ts/query?package=$packageId"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
+        status shouldBe StatusCodes.BadRequest
+        responseAs[TimeSeriesException] should be(
+          TimeSeriesException.UnexpectedError("not-a-time-series is not a time series package", Nil)
+        )
 
       }
     }
+
+    "return not found for a package not in the discover database" in { implicit dbSession =>
+      val packageId = "not-in-discover"
+      val underlyingHttpError = HttpError(StatusCodes.NotFound, s"Not found: ($packageId)")
+      ports
+        .getDiscoverApiClient()
+        .asInstanceOf[MockDiscoverApiClient]
+        .setResponse(Left(DiscoverApiError(underlyingHttpError)))
+
+      val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+
+      val url = s"/discover/ts/query?package=$packageId"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
+        status shouldBe StatusCodes.NotFound
+        responseAs[TimeSeriesException] should be(
+          TimeSeriesException.UnexpectedError(underlyingHttpError.getMessage, Nil)
+        )
+
+      }
+    }
+
   }
 
   private def createMessage(packageId: String) =

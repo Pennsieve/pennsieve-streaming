@@ -17,12 +17,25 @@
 package com.pennsieve.streaming.server
 
 import akka.actor.ActorSystem
-import com.pennsieve.models.{ Organization, User }
+import cats.data.EitherT
+import com.pennsieve.models.{ Organization, Package, PackageState, User }
 import com.pennsieve.traits.PostgresProfile.api._
-import com.pennsieve.core.utilities.{ InsecureContainer, SecureContainer }
+import com.pennsieve.core.utilities.{
+  DatabaseContainer,
+  InsecureContainer,
+  OrganizationContainer,
+  PackagesMapperContainer,
+  SecureContainer,
+  SecureCoreContainer,
+  TimeSeriesManagerContainer
+}
+import com.pennsieve.domain.{ CoreError, NotFound }
+import com.pennsieve.utilities.Container
+import com.pennsieve.core.utilities.FutureEitherHelpers.implicits._
+
 import com.typesafe.config.Config
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ ExecutionContext, Future }
 
 object containers {
 
@@ -32,7 +45,11 @@ object containers {
     system: ActorSystem
   ) extends InsecureContainer(config)(executionContext, system)
 
-  abstract class SecureAWSContainer(
+  trait ScopedContainer extends Container with TimeSeriesManagerContainer {
+    def getPackageByNodeId(nodeId: String): EitherT[Future, CoreError, Package]
+  }
+
+  class SecureAWSContainer(
     config: Config,
     db: Database,
     organization: Organization,
@@ -40,4 +57,35 @@ object containers {
     executionContext: ExecutionContext,
     system: ActorSystem
   ) extends SecureContainer(config, db, user, organization)(executionContext, system)
+      with ScopedContainer
+      with SecureCoreContainer {
+    override def getPackageByNodeId(nodeId: String): EitherT[Future, CoreError, Package] =
+      packageManager.getByNodeId(nodeId)
+  }
+
+  class OrganizationScopedContainer(
+    val config: Config,
+    _db: Database,
+    val organization: Organization,
+    implicit
+    val ec: ExecutionContext,
+    implicit
+    val system: ActorSystem
+  ) extends ScopedContainer
+      with OrganizationContainer
+      with DatabaseContainer
+      with PackagesMapperContainer {
+
+    override lazy val db: Database = _db
+
+    override def getPackageByNodeId(nodeId: String): EitherT[Future, CoreError, Package] = {
+      val query = packagesMapper
+        .filter(_.nodeId === nodeId)
+        .filter(_.state =!= (PackageState.DELETING: PackageState))
+        .result
+        .headOption
+      db.run(query).whenNone(NotFound(s"Package ($nodeId)"))
+    }
+  }
+
 }
