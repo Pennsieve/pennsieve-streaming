@@ -403,8 +403,8 @@ class WebServerDiscoverRoutesSpec
         // virtual channels back
         testClient.sendMessage(montageRequest)
         val virtualChannelsList = ports
-          .parseJsonFromMessage[ChannelsList](testClient.expectMessage())
-          .virtualChannels
+          .parseJsonFromMessage[ChannelsDetailsList](testClient.expectMessage())
+          .channelDetails
           .map(vc => vc.id -> vc.name)
 
         val expected = MontageType.ReferentialVsCz.pairs.map {
@@ -475,8 +475,8 @@ class WebServerDiscoverRoutesSpec
         // virtual channels back
         testClient.sendMessage(montageRequest)
         val virtualChannelsList = ports
-          .parseJsonFromMessage[ChannelsList](testClient.expectMessage())
-          .virtualChannels
+          .parseJsonFromMessage[ChannelsDetailsList](testClient.expectMessage())
+          .channelDetails
           .map(vc => vc.id -> vc.name)
         val expected = ports.MontageMap.toList
 
