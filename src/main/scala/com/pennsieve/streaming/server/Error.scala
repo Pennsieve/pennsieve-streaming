@@ -18,6 +18,7 @@ package com.pennsieve.streaming.server
 
 import akka.http.scaladsl.model.{ StatusCode, StatusCodes }
 import com.pennsieve.domain.CoreError
+import com.pennsieve.streaming.clients.HttpError
 import com.pennsieve.streaming.server.TSJsonSupport._
 import spray.json._
 
@@ -49,6 +50,15 @@ object TimeSeriesException {
       s"Some of the requested channels do not exist in this package: $packageId"
 
     override val statusCode = StatusCodes.NotFound
+  }
+
+  /** The package with the given id is not a time series package */
+  case class NotTimeSeries(packageId: String) extends TimeSeriesException {
+    override val name = "NotTimeSeries"
+    override val reason =
+      s"$packageId is not a time series package"
+
+    override val statusCode = StatusCodes.BadRequest
   }
 
   /** The request was missing both the virtualChannels and the
@@ -110,6 +120,14 @@ object TimeSeriesException {
     override val reason = error.toString
 
     override val statusCode = StatusCodes.InternalServerError
+  }
+
+  /** Error originating in the discover api */
+  case class DiscoverApiError(error: HttpError) extends TimeSeriesException {
+    override val name = "DiscoverApiError"
+    override val reason = error.getMessage
+
+    override val statusCode = error.statusCode
   }
 
   def fromCoreError(coreError: CoreError): TimeSeriesException = {

@@ -168,3 +168,12 @@ resource "aws_ssm_parameter" "jwt_key" {
     ignore_changes = [value]
   }
 }
+
+// DISCOVER API CONFIGURATION
+
+resource "aws_ssm_parameter" "discover_api_host" {
+  name = "/${var.environment_name}/${var.service_name}/discover-api-host"
+  type = "String"
+
+  value = "https://${data.terraform_remote_state.discover_api.outputs.internal_fqdn}"
+}

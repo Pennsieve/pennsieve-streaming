@@ -23,16 +23,11 @@ import com.pennsieve.streaming.server.TSJsonSupport._
 
 import scala.util.{ Failure, Success }
 
-class MontageValidationService(
-  claim: Claim
-)(implicit
-  ports: WebServerPorts
-) extends Directives
-    with TSJsonSupport {
+class MontageValidationService extends Directives with TSJsonSupport {
 
-  def route(packageId: String): Route =
+  def route(claim: Claim, getChannelsQuery: GetChannelsQuery)(packageId: String): Route = {
     get {
-      onComplete(ports.getChannels(packageId, claim).value) {
+      onComplete(getChannelsQuery.query(packageId, claim).value) {
         case Failure(e) => complete(StatusCodes.InternalServerError, e)
         case Success(channelsResult) =>
           channelsResult
@@ -43,4 +38,5 @@ class MontageValidationService(
             .fold(err => complete(err.statusCode, err), _ => complete(StatusCodes.OK))
       }
     }
+  }
 }

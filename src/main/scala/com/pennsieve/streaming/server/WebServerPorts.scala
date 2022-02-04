@@ -20,11 +20,18 @@ import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.implicits._
 import com.pennsieve.auth.middleware.{ Jwt, ServiceClaim, UserClaim }
-import com.pennsieve.core.utilities.{ InsecureCoreContainer, JwtAuthenticator, SecureCoreContainer }
+import com.pennsieve.core.utilities.{ InsecureCoreContainer, JwtAuthenticator }
+import com.pennsieve.domain.CoreError
 import com.pennsieve.models.{ Channel, Organization, Package, User }
 import com.pennsieve.streaming.TimeSeriesLogContext
+import com.pennsieve.streaming.clients.{ DiscoverApiClient, DiscoverApiClientImpl, HttpClient }
 import com.pennsieve.streaming.server.TimeSeriesFlow.WithErrorT
-import com.pennsieve.streaming.server.containers.{ InsecureAWSContainer, SecureAWSContainer }
+import com.pennsieve.streaming.server.containers.{
+  InsecureAWSContainer,
+  OrganizationScopedContainer,
+  ScopedContainer,
+  SecureAWSContainer
+}
 import com.typesafe.config.Config
 
 import scala.concurrent.{ ExecutionContext, Future }
@@ -36,13 +43,16 @@ import scala.concurrent.{ ExecutionContext, Future }
 trait WebServerPorts {
   def getChannels(
     packageNodeId: String,
-    claim: Jwt.Claim
+    claim: Jwt.Claim,
+    packageOrgId: Option[Int] = None
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)]
 
   def getChannelByNodeId(
     channelNodeId: String,
     claim: Jwt.Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)]
+
+  def getDiscoverApiClient(): DiscoverApiClient
 
   val rangeLookupQuery =
     "select id, location, channel, rate, lower(range) as lo, upper(range) as hi from timeseries.ranges where (channel = {channel}) and (range && int8range({qstart},{qend})) order by lo asc"
@@ -64,8 +74,21 @@ class GraphWebServerPorts(
 ) extends WebServerPorts {
   private val insecureContainer =
     new InsecureAWSContainer(config, ec, system) with InsecureCoreContainer
+  private val discoverApiClient =
+    new DiscoverApiClientImpl(config.getString("discover-api.host"), HttpClient())
 
   implicit val jwtConfig: Jwt.Config = getJwtConfig(config)
+
+  override def getDiscoverApiClient() =
+    discoverApiClient
+
+  private def lookupOrg(orgId: Option[Int]): EitherT[Future, CoreError, Option[Organization]] = {
+    if (orgId.isDefined)
+      insecureContainer.organizationManager.get(orgId.get).map(Some(_))
+    else
+      EitherT.rightT(None)
+
+  }
 
   /**
     * Get a secure container instance from a JWT.
@@ -76,7 +99,7 @@ class GraphWebServerPorts(
     *
     * @return
     */
-  private def getSecureContainerFromJwt(claim: Jwt.Claim) =
+  private def getSecureContainerFromJwt(claim: Jwt.Claim, packageOrgId: Option[Int]) =
     claim.content match {
       // case: User
       //   Attempt to extract out a (user, organization) and use that to build a secure container:
@@ -85,9 +108,11 @@ class GraphWebServerPorts(
           userContext <- {
             JwtAuthenticator.userContext(insecureContainer, claim)
           }
+          packageOrg <- lookupOrg(packageOrgId)
+
         } yield {
           val sContainer =
-            secureContainerBuilder(userContext.user, userContext.organization)
+            scopedContainerBuilder(userContext.user, userContext.organization, packageOrg)
           (
             sContainer,
             TimeSeriesLogContext(
@@ -102,10 +127,26 @@ class GraphWebServerPorts(
       case ServiceClaim(_) => ???
     }
 
-  private def secureContainerBuilder(
+  private def scopedContainerBuilder(
     user: User,
-    org: Organization
-  ): SecureAWSContainer with SecureCoreContainer =
+    userOrg: Organization,
+    packageOrgOpt: Option[Organization]
+  ): ScopedContainer = {
+    packageOrgOpt match {
+      case None => secureContainerBuilder(user, userOrg)
+      case Some(packageOrg) =>
+        new OrganizationScopedContainer(
+          insecureContainer.config,
+          insecureContainer.db,
+          packageOrg,
+          system.dispatcher,
+          system
+        )
+
+    }
+  }
+
+  private def secureContainerBuilder(user: User, org: Organization): ScopedContainer =
     new SecureAWSContainer(
       insecureContainer.config,
       insecureContainer.db,
@@ -113,36 +154,37 @@ class GraphWebServerPorts(
       user,
       system.dispatcher,
       system
-    ) with SecureCoreContainer
+    )
 
   override def getChannels(
     packageNodeId: String,
-    claim: Jwt.Claim
+    claim: Jwt.Claim,
+    packageOrgId: Option[Int]
   ): WithErrorT[(List[Channel], TimeSeriesLogContext)] =
     for {
-      containerAndLogContext <- getSecureContainerFromJwt(claim)
+      containerAndLogContext <- getSecureContainerFromJwt(claim, packageOrgId)
         .leftMap(TimeSeriesException.fromCoreError)
       (secureContainer, logContext) = containerAndLogContext
 
-      `package` <- {
-        secureContainer.packageManager
-          .getByNodeId(packageNodeId)
+      pennsievePackage <- {
+        secureContainer
+          .getPackageByNodeId(packageNodeId)
           .leftMap(TimeSeriesException.fromCoreError)
       }: EitherT[Future, TimeSeriesException, Package]
 
       channels <- {
         secureContainer.timeSeriesManager
-          .getChannels(`package`)
+          .getChannels(pennsievePackage)
           .leftMap(TimeSeriesException.fromCoreError)
       }
-    } yield (channels, logContext.withPackageId(`package`.id))
+    } yield (channels, logContext.withPackageId(pennsievePackage.id))
 
   override def getChannelByNodeId(
     channelNodeId: String,
     claim: Jwt.Claim
   ): WithErrorT[(Channel, TimeSeriesLogContext)] = {
     for {
-      containerAndLogContext <- getSecureContainerFromJwt(claim)
+      containerAndLogContext <- getSecureContainerFromJwt(claim, None)
         .leftMap(TimeSeriesException.fromCoreError)
       (secureContainer, logContext) = containerAndLogContext
       channel <- secureContainer.timeSeriesManager
