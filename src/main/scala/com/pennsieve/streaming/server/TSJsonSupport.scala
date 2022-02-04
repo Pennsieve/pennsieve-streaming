@@ -37,6 +37,18 @@ case class TimeSeriesError(error: String, reason: String, channelNames: List[Str
   */
 final case class VirtualChannel(id: String, name: String)
 
+/** A list of virtual channels */
+case class ChannelsDetailsList(channelDetails: List[VirtualChannelInfo])
+
+/**
+  * Representation of channel detail which is send to the client in response to Montge request
+  * @param id
+  * @param name
+  * @param start
+  * @param end
+  */
+final case class VirtualChannelInfo(id: String, name: String, start: Long, end: Long)
+
 /** Indicates that the request type will elicit a websocket response
   * from this service
   */
@@ -275,6 +287,8 @@ object TSJsonSupport {
 
   implicit val minimalChannelFormat = jsonFormat2(VirtualChannel)
   implicit val channelsListFormat = jsonFormat1(ChannelsList)
+  implicit val detailsChannelFormat = jsonFormat4(VirtualChannelInfo)
+  implicit val channelsDetailsListFormat = jsonFormat1(ChannelsDetailsList)
   implicit val timeSeriesErrorFormat = jsonFormat3(TimeSeriesError)
   implicit val timeSeriesRequestFormat = jsonFormat8(TimeSeriesRequest)
   implicit val KeepAliveFormat = jsonFormat1(KeepAlive)

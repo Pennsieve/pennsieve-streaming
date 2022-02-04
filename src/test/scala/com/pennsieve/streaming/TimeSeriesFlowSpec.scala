@@ -379,14 +379,14 @@ class TimeSeriesFlowSpec
     val result: immutable.Seq[Message] = Await.result(runfuture, 10 seconds)
     assert(result.length == 2)
 
-    val montageList = ports.parseJsonFromMessage[ChannelsList](result.head)
+    val montageList = ports.parseJsonFromMessage[ChannelsDetailsList](result.head)
     val timeSeriesMessage =
       ports
         .parseProtobufFromMessage(TimeSeriesMessage.parseFrom)(result.last)
         .segment
         .get
 
-    montageList.virtualChannels.map(_.name) should contain theSameElementsAs (MontageType.ReferentialVsCz.names)
+    montageList.channelDetails.map(_.name) should contain theSameElementsAs (MontageType.ReferentialVsCz.names)
 
     assert(timeSeriesMessage.source == leadChannelId)
     assert(timeSeriesMessage.channelName == montageName)

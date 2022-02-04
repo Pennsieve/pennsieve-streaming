@@ -450,10 +450,15 @@ class TimeSeriesFlow(
 
           val packageVirtualChannels = channelMap.map {
             case (id, channel) =>
-              VirtualChannel(id = id, name = channel.name)
+              VirtualChannelInfo(
+                id = id,
+                name = channel.name,
+                start = channel.start,
+                end = channel.end
+              )
           }.toList
 
-          Right(ChannelsList(virtualChannels = packageVirtualChannels))
+          Right(ChannelsDetailsList(channelDetails = packageVirtualChannels))
         }
         case mr @ MontageRequest(_, montageType) =>
           montageType.pairs
@@ -469,20 +474,21 @@ class TimeSeriesFlow(
                     // not be set to the montage in this request).
                     buildMontage(mr)
 
-                    val leadChannelId =
+                    val leadChannel =
                       channelMap.values
                         .find(c => c.name == leadChannelName)
                         .get
-                        .nodeId
 
-                    VirtualChannel(
-                      id = leadChannelId,
-                      name = Montage.getMontageName(leadChannelName, Some(secondaryChannelName))
+                    VirtualChannelInfo(
+                      id = leadChannel.nodeId,
+                      name = Montage.getMontageName(leadChannelName, Some(secondaryChannelName)),
+                      start = leadChannel.start,
+                      end = leadChannel.end
                     )
                   }
             }
             .sequence
-            .map(virtualChannels => ChannelsList(virtualChannels = virtualChannels))
+            .map(virtualChannels => ChannelsDetailsList(channelDetails = virtualChannels))
       }
       .map(_.fold(e => TextMessage(e.json), is => TextMessage(is.toJson.toString)))
 
