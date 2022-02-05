@@ -47,7 +47,15 @@ case class ChannelsDetailsList(channelDetails: List[VirtualChannelInfo])
   * @param start
   * @param end
   */
-final case class VirtualChannelInfo(id: String, name: String, start: Long, end: Long)
+final case class VirtualChannelInfo(
+  id: String,
+  name: String,
+  start: Long,
+  end: Long,
+  channelType: String,
+  rate: Double,
+  unit: String
+)
 
 /** Indicates that the request type will elicit a websocket response
   * from this service
@@ -287,7 +295,7 @@ object TSJsonSupport {
 
   implicit val minimalChannelFormat = jsonFormat2(VirtualChannel)
   implicit val channelsListFormat = jsonFormat1(ChannelsList)
-  implicit val detailsChannelFormat = jsonFormat4(VirtualChannelInfo)
+  implicit val detailsChannelFormat = jsonFormat7(VirtualChannelInfo)
   implicit val channelsDetailsListFormat = jsonFormat1(ChannelsDetailsList)
   implicit val timeSeriesErrorFormat = jsonFormat3(TimeSeriesError)
   implicit val timeSeriesRequestFormat = jsonFormat8(TimeSeriesRequest)
