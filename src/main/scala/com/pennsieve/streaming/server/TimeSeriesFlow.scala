@@ -454,7 +454,10 @@ class TimeSeriesFlow(
                 id = id,
                 name = channel.name,
                 start = channel.start,
-                end = channel.end
+                end = channel.end,
+                channelType = channel.`type`,
+                rate = channel.rate,
+                unit = channel.unit
               )
           }.toList
 
@@ -483,7 +486,10 @@ class TimeSeriesFlow(
                       id = leadChannel.nodeId,
                       name = Montage.getMontageName(leadChannelName, Some(secondaryChannelName)),
                       start = leadChannel.start,
-                      end = leadChannel.end
+                      end = leadChannel.end,
+                      channelType = leadChannel.`type`,
+                      rate = leadChannel.rate,
+                      unit = leadChannel.unit
                     )
                   }
             }
