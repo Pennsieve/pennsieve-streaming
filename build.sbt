@@ -121,12 +121,21 @@ enablePlugins(sbtdocker.DockerPlugin)
 dockerfile in docker := {
   val artifact: File = assembly.value
   val artifactTargetPath = s"/app/${artifact.name}"
+
+  // Where Postgres (psql/JDBC) expects to find the trusted CA certificate
+  val CA_CERT_LOCATION = "/home/pennsieve/.postgresql/root.crt"
+
   new Dockerfile {
     from("pennsieve/java-cloudwrap:8-jre-alpine-0.5.9")
     copy(artifact, artifactTargetPath, chown="pennsieve:pennsieve")
     copy(baseDirectory.value / "bin" / "run.sh", "/app/run.sh", chown="pennsieve:pennsieve")
-    run("mkdir", "-p", "/home/pennsieve/.postgresql")
-    run("wget", "-qO", "/home/pennsieve/.postgresql/root.crt", "https://s3.amazonaws.com/rds-downloads/rds-ca-2019-root.pem")
+    addRaw(
+      "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem",
+      CA_CERT_LOCATION,
+    )
+    user("root")
+    run("chmod", "+r", CA_CERT_LOCATION)
+    user("pennsieve")
     cmd("--service", "pennsieve-streaming", "exec", "/app/run.sh", artifactTargetPath)
   }
 }
