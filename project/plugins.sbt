@@ -2,7 +2,7 @@ logLevel := Level.Warn
 
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.14.6")
 
-addSbtPlugin("se.marcuslonnberg" % "sbt-docker" % "1.5.0")
+addSbtPlugin("se.marcuslonnberg" % "sbt-docker" % "1.11.0")
 
 addCompilerPlugin( "org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full)
 
