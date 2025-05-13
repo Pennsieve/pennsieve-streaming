@@ -26,6 +26,7 @@ import uk.me.berndporr.iirj.Cascade
 
 import scala.collection.mutable
 import scala.concurrent.{ ExecutionContext, Future }
+import akka.stream.scaladsl.{ Sink, Source }
 
 /** Provides functions for transforming RangeRequest queries into
   * streams of timeseries data
