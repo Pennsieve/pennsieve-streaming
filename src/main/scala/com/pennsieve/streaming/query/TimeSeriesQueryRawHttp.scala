@@ -26,7 +26,6 @@ import uk.me.berndporr.iirj.Cascade
 
 import scala.collection.mutable
 import scala.concurrent.{ ExecutionContext, Future }
-import akka.stream.scaladsl.{ Sink, Source }
 
 /** Provides functions for transforming RangeRequest queries into
   * streams of timeseries data
@@ -183,13 +182,13 @@ class TimeSeriesQueryRawHttp(
     *         montaged data and a list of the given closeables
     */
   private def montage(
-    leadChannel:Seq[Double],
-    secondaryChannel:  Option[Seq[Double]]
+    leadChannel: Source[Double, Any],
+    secondaryChannel: Option[Source[Double, Any]]
   ): Source[Double, Any] =
     secondaryChannel match {
       case Some(data) =>
-        Source(leadChannel.zip(data).map(p => p._1 - p._2).toList)
-      case None => Source(leadChannel.toList)
+        leadChannel.zip(data).map(p => p._1 - p._2)
+      case None => leadChannel
     }
 
   /** Given a location, stream the data from that location with the wsClient.
@@ -201,8 +200,8 @@ class TimeSeriesQueryRawHttp(
     *         should be used along with the wsClient.close method to
     *         release all resources
     */
-  private def requestData(location: String): Future[Seq[Double]] =
-    wsClient
-      .getDataSource(location)
-      .flatMap(_.runWith(Sink.seq))
+  private def requestData(location: String): Future[Source[Double, Any]] =
+    wsClient.getDataSource(location).map { source =>
+    source.alsoTo(Sink.headOption) // Immediately consumes source
+  }
 }
