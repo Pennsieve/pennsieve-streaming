@@ -188,8 +188,8 @@ class TimeSeriesQueryRawHttp(
   ): Source[Double, Any] =
     secondaryChannel match {
       case Some(data) =>
-        Source(leadChannel.zip(data).map(p => p._1 - p._2))
-      case None => Source(leadChannel)
+        Source(leadChannel.zip(data).map(p => p._1 - p._2).toList)
+      case None => Source(leadChannel.toList)
     }
 
   /** Given a location, stream the data from that location with the wsClient.
