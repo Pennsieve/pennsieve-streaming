@@ -182,13 +182,13 @@ class TimeSeriesQueryRawHttp(
     *         montaged data and a list of the given closeables
     */
   private def montage(
-    leadChannel: Source[Double, Any],
-    secondaryChannel: Option[Source[Double, Any]]
+    leadChannel:Seq[Double],
+    secondaryChannel:  Option[Seq[Double]]
   ): Source[Double, Any] =
     secondaryChannel match {
       case Some(data) =>
-        leadChannel.zip(data).map(p => p._1 - p._2)
-      case None => leadChannel
+        Source(leadChannel.zip(data).map(p => p._1 - p._2))
+      case None => Source(leadChannel)
     }
 
   /** Given a location, stream the data from that location with the wsClient.
@@ -200,6 +200,8 @@ class TimeSeriesQueryRawHttp(
     *         should be used along with the wsClient.close method to
     *         release all resources
     */
-  private def requestData(location: String): Future[Source[Double, Any]] =
-    wsClient.getDataSource(location)
+  private def requestData(location: String): Future[Seq[Double]] =
+    wsClient
+      .getDataSource(location)
+      .flatMap(_.runWith(Sink.seq))
 }
