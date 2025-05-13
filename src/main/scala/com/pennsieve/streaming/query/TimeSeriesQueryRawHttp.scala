@@ -200,8 +200,9 @@ class TimeSeriesQueryRawHttp(
     *         should be used along with the wsClient.close method to
     *         release all resources
     */
-  private def requestData(location: String): Future[Source[Double, Any]] =
+  def requestData(location: String): Future[Source[Double, Any]] =
     wsClient.getDataSource(location).map { source =>
-    source.alsoTo(Sink.headOption) // Immediately consumes source
+      // Acknowledge connection, does not consume any data
+      source.alsoTo(Sink.ignore)
   }
 }
