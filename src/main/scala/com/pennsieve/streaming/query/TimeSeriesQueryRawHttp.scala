@@ -17,7 +17,7 @@
 package com.pennsieve.streaming.query
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.Source
+import akka.stream.scaladsl.{Source, Sink}
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 import com.pennsieve.streaming.server.Montage
@@ -200,6 +200,9 @@ class TimeSeriesQueryRawHttp(
     *         should be used along with the wsClient.close method to
     *         release all resources
     */
-  private def requestData(location: String): Future[Source[Double, Any]] =
-    wsClient.getDataSource(location)
+  def requestData(location: String): Future[Source[Double, Any]] =
+    wsClient.getDataSource(location).map { source =>
+      // Trigger subscription to avoid timeout, discard in a side channel
+      source.alsoTo(Sink.ignore)
+  }
 }
