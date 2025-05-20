@@ -151,12 +151,17 @@ class S3WsClient(
 ) extends WsClient {
 
   private val s3host = appconfig.getString("timeseries.s3-host")
+  private val s3Port = appconfig.getInt("timeseries.s3-port")
+  private val s3UseSsl = appconfig.getBoolean("timeseries.s3-use-ssl")
   private val QueueSize = appconfig.getInt("timeseries.request-queue-size")
 
   // This idea came initially from this blog post:
   // http://kazuhiro.github.io/scala/akka/akka-http/akka-streams/2016/01/31/connection-pooling-with-akka-http-and-source-queue.html
   private val poolClientFlow =
-    Http().cachedHostConnectionPoolHttps[Promise[HttpResponse]](host = s3host)
+    if (s3UseSsl)
+      Http().cachedHostConnectionPoolHttps[Promise[HttpResponse]](host = s3host, port = s3Port)
+    else Http().cachedHostConnectionPool[Promise[HttpResponse]](host = s3host, port = s3Port)
+
   private val queue =
     Source
       .queue[(HttpRequest, Promise[HttpResponse])](QueueSize, OverflowStrategy.dropHead)
@@ -187,25 +192,29 @@ class S3WsClient(
     queueRequest(
       HttpRequest(uri = url)
         .withHeaders(RawHeader("Accept-Encoding", "gzip"))
-    ).map(
-      _.entity.dataBytes
+    ).flatMap { response =>
+      val stream = response.entity.dataBytes
         .via(Gzip.decoderFlow)
         .via(new ByteStringChunker(8))
         .map(bs => getDouble(bs.toArray))
         .via(OptionFilter)
-    )
+
+      stream.runWith(Sink.seq).map(Source(_))
+    }
 
   override def getEventSource(url: String): Future[Source[Long, Any]] =
     queueRequest(
       HttpRequest(uri = url)
         .withHeaders(RawHeader("Accept-Encoding", "gzip"))
-    ).map(
-      _.entity.dataBytes
+    ).flatMap { response =>
+      val stream = response.entity.dataBytes
         .via(Gzip.decoderFlow)
         .via(new ByteStringChunker(9))
         .map(bs => getLong(bs.toArray.dropRight(1))) // for now, ignore unit classification that follows the event timestamp
         .via(OptionFilter)
-    )
+
+      stream.runWith(Sink.seq).map(Source(_))
+    }
 }
 
 /**
