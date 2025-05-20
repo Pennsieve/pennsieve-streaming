@@ -156,7 +156,11 @@ class S3WsClient(
   // This idea came initially from this blog post:
   // http://kazuhiro.github.io/scala/akka/akka-http/akka-streams/2016/01/31/connection-pooling-with-akka-http-and-source-queue.html
   private val poolClientFlow =
-    Http().cachedHostConnectionPoolHttps[Promise[HttpResponse]](host = s3host)
+    if (s3host.startsWith("localhost"))
+      Http().cachedHostConnectionPool[Promise[HttpResponse]](host = s3host, port = 8081)
+    else
+      Http().cachedHostConnectionPoolHttps[Promise[HttpResponse]](host = s3host)
+
   private val queue =
     Source
       .queue[(HttpRequest, Promise[HttpResponse])](QueueSize, OverflowStrategy.dropHead)
@@ -201,13 +205,15 @@ class S3WsClient(
     queueRequest(
       HttpRequest(uri = url)
         .withHeaders(RawHeader("Accept-Encoding", "gzip"))
-    ).map(
-      _.entity.dataBytes
+    ).flatMap { response =>
+      val stream = response.entity.dataBytes
         .via(Gzip.decoderFlow)
         .via(new ByteStringChunker(9))
         .map(bs => getLong(bs.toArray.dropRight(1))) // for now, ignore unit classification that follows the event timestamp
         .via(OptionFilter)
-    )
+
+      stream.runWith(Sink.seq).map(Source(_))
+    }
 }
 
 /**
