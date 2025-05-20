@@ -75,6 +75,7 @@ class WsClientSpec
     val port = Await.result(bindingFuture, 3.seconds).localAddress.getPort
     fakeConfig = ConfigFactory
       .empty()
+      .withValue("timeseries.s3-use-ssl", ConfigValueFactory.fromAnyRef(false))
       .withValue("timeseries.s3-host", ConfigValueFactory.fromAnyRef("localhost"))
       .withValue("timeseries.s3-port", ConfigValueFactory.fromAnyRef(port))
       .withValue("timeseries.request-queue-size", ConfigValueFactory.fromAnyRef(10))

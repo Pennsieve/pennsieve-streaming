@@ -152,12 +152,15 @@ class S3WsClient(
 
   private val s3host = appconfig.getString("timeseries.s3-host")
   private val s3Port = appconfig.getInt("timeseries.s3-port")
+  private val s3UseSsl = appconfig.getBoolean("timeseries.s3-use-ssl")
   private val QueueSize = appconfig.getInt("timeseries.request-queue-size")
 
   // This idea came initially from this blog post:
   // http://kazuhiro.github.io/scala/akka/akka-http/akka-streams/2016/01/31/connection-pooling-with-akka-http-and-source-queue.html
   private val poolClientFlow =
-    Http().cachedHostConnectionPool[Promise[HttpResponse]](host = s3host, port = s3Port)
+    if (s3UseSsl)
+      Http().cachedHostConnectionPoolHttps[Promise[HttpResponse]](host = s3host, port = s3Port)
+    else Http().cachedHostConnectionPool[Promise[HttpResponse]](host = s3host, port = s3Port)
 
   private val queue =
     Source
