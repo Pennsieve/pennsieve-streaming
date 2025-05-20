@@ -187,13 +187,15 @@ class S3WsClient(
     queueRequest(
       HttpRequest(uri = url)
         .withHeaders(RawHeader("Accept-Encoding", "gzip"))
-    ).map(
-      _.entity.dataBytes
+    ).flatMap { response =>
+      val stream = response.entity.dataBytes
         .via(Gzip.decoderFlow)
         .via(new ByteStringChunker(8))
         .map(bs => getDouble(bs.toArray))
         .via(OptionFilter)
-    )
+
+      stream.runWith(Sink.seq).map(Source(_))
+    }
 
   override def getEventSource(url: String): Future[Source[Long, Any]] =
     queueRequest(
