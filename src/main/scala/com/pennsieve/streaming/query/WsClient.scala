@@ -151,15 +151,13 @@ class S3WsClient(
 ) extends WsClient {
 
   private val s3host = appconfig.getString("timeseries.s3-host")
+  private val s3Port = appconfig.getInt("timeseries.s3-port")
   private val QueueSize = appconfig.getInt("timeseries.request-queue-size")
 
   // This idea came initially from this blog post:
   // http://kazuhiro.github.io/scala/akka/akka-http/akka-streams/2016/01/31/connection-pooling-with-akka-http-and-source-queue.html
   private val poolClientFlow =
-    if (s3host.startsWith("localhost"))
-      Http().cachedHostConnectionPool[Promise[HttpResponse]](host = s3host, port = 8081)
-    else
-      Http().cachedHostConnectionPoolHttps[Promise[HttpResponse]](host = s3host)
+    Http().cachedHostConnectionPool[Promise[HttpResponse]](host = s3host, port = s3Port)
 
   private val queue =
     Source

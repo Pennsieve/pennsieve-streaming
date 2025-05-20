@@ -26,7 +26,7 @@ import akka.stream.scaladsl.{ Sink, Source }
 import akka.util.ByteString
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.{ S3WsClient, WsClient }
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ ConfigFactory, ConfigValueFactory }
 import org.scalatest.{ BeforeAndAfterAll, FlatSpec, Matchers }
 
 import java.io.ByteArrayOutputStream
@@ -50,16 +50,11 @@ class WsClientSpec
   implicit val mat: Materializer = Materializer(system)
 
   private var bindingFuture: Future[Http.ServerBinding] = _
-  private val port = 8081
 
-  val fakeConfig = ConfigFactory.parseString("""
-        timeseries.s3-host = "localhost"
-        timeseries.s3-port = 8081
-        timeseries.request-queue-size = 10
-    """)
+  var fakeConfig: com.typesafe.config.Config = _
 
-  val wsClient = new S3WsClient(fakeConfig)
-  val url = s"http://localhost:8081/test-data"
+  var wsClient: S3WsClient = _
+  val url = "/test-data"
 
   override def beforeAll(): Unit = {
     val testData = (1 to 100000).map(_.toString)
@@ -76,8 +71,14 @@ class WsClientSpec
         }
       }
 
-    bindingFuture = Http().bindAndHandle(testRoute, "localhost", port)
-    Await.result(bindingFuture, 3.seconds)
+    bindingFuture = Http().bindAndHandle(testRoute, "localhost", 0)
+    val port = Await.result(bindingFuture, 3.seconds).localAddress.getPort
+    fakeConfig = ConfigFactory
+      .empty()
+      .withValue("timeseries.s3-host", ConfigValueFactory.fromAnyRef("localhost"))
+      .withValue("timeseries.s3-port", ConfigValueFactory.fromAnyRef(port))
+      .withValue("timeseries.request-queue-size", ConfigValueFactory.fromAnyRef(10))
+    wsClient = new S3WsClient(fakeConfig)
   }
 
   override def afterAll(): Unit = {
