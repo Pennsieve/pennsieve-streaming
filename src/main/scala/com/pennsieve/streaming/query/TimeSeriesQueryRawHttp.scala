@@ -17,7 +17,7 @@
 package com.pennsieve.streaming.query
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{Source, Sink}
+import akka.stream.scaladsl.{ Sink, Source }
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 import com.pennsieve.streaming.server.Montage
@@ -201,5 +201,5 @@ class TimeSeriesQueryRawHttp(
     *         release all resources
     */
   private def requestData(location: String): Future[Source[Double, Any]] =
-      wsClient.getDataSource(location)
+    wsClient.getDataSource(location)
 }
