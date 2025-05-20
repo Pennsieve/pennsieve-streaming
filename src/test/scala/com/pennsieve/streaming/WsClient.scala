@@ -102,7 +102,7 @@ class WsClientSpec
     val dataFut = sourceFut.flatMap(_.runWith(Sink.seq))
     val result = Await.result(dataFut, 5.seconds)
 
-    println(s"got stream with ${result.length} items: $result")
+    println(s"got stream with ${result.length} items")
     result should not be empty
     println(s"Streamed ${result.length} values from $url")
   }
@@ -116,7 +116,7 @@ class WsClientSpec
     val dataFut = sourceFut.flatMap(_.runWith(Sink.seq))
     val result = Await.result(dataFut, 5.seconds)
 
-    println(s"got stream with ${result.length} items: $result")
+    println(s"got stream with ${result.length} items")
     result should not be empty
     println(s"Streamed ${result.length} values from $url")
   }
