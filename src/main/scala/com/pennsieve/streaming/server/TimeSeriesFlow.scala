@@ -294,10 +294,16 @@ class TimeSeriesFlow(
 
   def buildMontage(req: MontageRequest): MontageRequest = {
     req match {
-      case MontageRequest(packageId, MontageType.NotMontaged) => {
+      case MontageRequest(packageId, MontageType.NotMontaged, _) => {
         packageMontages.remove(packageId)
       }
-      case MontageRequest(packageId, mt) => {
+      case MontageRequest(packageId, MontageType.CustomMontage(), montageMap) => {
+        log.noContext.error("Getting custom Montage " + montageMap.get)
+        val customMontage = MontageType.CustomMontage()
+        customMontage.updatePairs(montageMap.get) // Set the custom pairs
+        packageMontages.put(packageId, customMontage)
+      }
+      case MontageRequest(packageId, mt, _) => {
         packageMontages.put(packageId, mt)
       }
     }
@@ -444,7 +450,7 @@ class TimeSeriesFlow(
   val listMontageChannels: Flow[MontageRequest, Message, NotUsed] =
     Flow[MontageRequest]
       .map {
-        case mr @ MontageRequest(_, MontageType.NotMontaged) => {
+        case mr @ MontageRequest(_, MontageType.NotMontaged, _) => {
           // set the montage state
           buildMontage(mr)
 
@@ -463,7 +469,42 @@ class TimeSeriesFlow(
 
           Right(ChannelsDetailsList(channelDetails = packageVirtualChannels))
         }
-        case mr @ MontageRequest(_, montageType) =>
+        case mr @ MontageRequest(_, MontageType.CustomMontage(), montageMap) => {
+          val customMontage = MontageType.CustomMontage()
+          customMontage.updatePairs(montageMap.get)
+          customMontage.pairs
+            .map {
+              case (leadChannelName, secondaryChannelName) =>
+                // return an error if the package is not montageable
+                Montage
+                  .checkMontageability(MontageType.CustomMontage(), channelMap)
+                  .map { _ =>
+                    // This package is montageable with this montage, so we can
+                    // set the montage state.
+                    // (If the package is not montageable, the montage state will
+                    // not be set to the montage in this request).
+                    buildMontage(mr)
+
+                    val leadChannel =
+                      channelMap.values
+                        .find(c => c.name == leadChannelName)
+                        .get
+
+                    VirtualChannelInfo(
+                      id = leadChannel.nodeId,
+                      name = Montage.getMontageName(leadChannelName, Some(secondaryChannelName)),
+                      start = leadChannel.start,
+                      end = leadChannel.end,
+                      channelType = leadChannel.`type`,
+                      rate = leadChannel.rate,
+                      unit = leadChannel.unit
+                    )
+                  }
+            }
+            .sequence
+            .map(virtualChannels => ChannelsDetailsList(channelDetails = virtualChannels))
+        }
+        case mr @ MontageRequest(_, montageType, _) =>
           montageType.pairs
             .map {
               case (leadChannelName, secondaryChannelName) =>
@@ -498,7 +539,7 @@ class TimeSeriesFlow(
       }
       .map(_.fold(e => TextMessage(e.json), is => TextMessage(is.toJson.toString)))
 
-  val flowGraph =
+  val flowGraph: Graph[FlowShape[Message, Message], NotUsed] =
     GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits._
 

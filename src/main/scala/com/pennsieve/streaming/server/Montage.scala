@@ -217,7 +217,7 @@ sealed trait MontageType {
   /** A list of channel pairs (leadChannel -> secondaryChannel) for
     * each montage.
     */
-  val pairs: List[(String, String)]
+  def pairs: List[(String, String)]
 
   /** The set of virtual channel names for this montage type */
   def names: Set[String] =
@@ -228,6 +228,34 @@ sealed trait MontageType {
     pairs.flatMap(tup => List(tup._1, tup._2)).toSet
 }
 object MontageType {
+
+  /** A mutable custom montage that can be configured at runtime */
+  case class CustomMontage() extends MontageType {
+
+    private var _pairs: List[(String, String)] = List.empty
+    override def pairs: List[(String, String)] = _pairs
+
+    /** Update the montage pairs */
+    def updatePairs(newPairs: List[(String, String)]): Unit = {
+      _pairs = newPairs
+    }
+
+    /** Add a single pair to the existing montage */
+    def addPair(pair: (String, String)): Unit = {
+      _pairs = _pairs :+ pair
+    }
+
+    /** Add multiple pairs to the existing montage */
+    def addPairs(newPairs: List[(String, String)]): Unit = {
+      _pairs = _pairs ++ newPairs
+    }
+
+    /** Clear all pairs */
+    def clearPairs(): Unit = {
+      _pairs = List.empty
+    }
+  }
+
   case object NotMontaged extends MontageType {
     override val pairs: List[(String, String)] = List.empty
   }
@@ -275,6 +303,7 @@ object MontageType {
       "Q1" -> "A1",
       "Q2" -> "A2"
     )
+
   }
   case object ReferentialVsCz extends MontageType {
     override val pairs = List(
