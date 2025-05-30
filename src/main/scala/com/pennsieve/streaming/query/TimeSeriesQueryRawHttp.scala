@@ -17,7 +17,7 @@
 package com.pennsieve.streaming.query
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{ Sink, Source }
+import akka.stream.scaladsl.{ Source }
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 import com.pennsieve.streaming.server.Montage

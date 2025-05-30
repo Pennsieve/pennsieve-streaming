@@ -231,7 +231,11 @@ final case class FilterRequest(
   channels: List[String]
 )
 
-final case class MontageRequest(packageId: String, montage: MontageType) extends Respondable
+final case class MontageRequest(
+  packageId: String,
+  montage: MontageType,
+  montageMap: Option[List[(String, String)]] = None
+) extends Respondable
 
 final case class ClearFilterRequest(channelFiltersToClear: List[String])
 final case class ResetFilterRequest(channelFiltersToReset: List[String])
@@ -247,6 +251,7 @@ object TSJsonSupport {
         case MontageType.BipolarAntPos => "BIPOLAR_ANT_POS"
         case MontageType.BipolarTransverse => "BIPOLAR_TRANSVERSE"
         case MontageType.ReferentialVsCz => "REFERENTIAL_VS_CZ"
+        case MontageType.CustomMontage() => "CUSTOM_MONTAGE"
       }
       JsString(toString)
     }
@@ -258,6 +263,7 @@ object TSJsonSupport {
         else if (montageType == "BIPOLAR_TRANSVERSE")
           MontageType.BipolarTransverse
         else if (montageType == "REFERENTIAL_VS_CZ") MontageType.ReferentialVsCz
+        else if (montageType == "CUSTOM_MONTAGE") MontageType.CustomMontage()
         else throw new Exception(s"Invalid value for MontageType: $montageType")
       case _ => throw new Exception("Invalid json format")
     }
@@ -301,7 +307,7 @@ object TSJsonSupport {
   implicit val timeSeriesRequestFormat = jsonFormat8(TimeSeriesRequest)
   implicit val KeepAliveFormat = jsonFormat1(KeepAlive)
   implicit val FilterRequestFormat = jsonFormat3(FilterRequest)
-  implicit val MontageRequestFormat = jsonFormat2(MontageRequest)
+  implicit val MontageRequestFormat = jsonFormat3(MontageRequest)
   implicit val ClearFilterRequestFormat = jsonFormat1(ClearFilterRequest)
   implicit val ResetFilterRequestFormat = jsonFormat1(ResetFilterRequest)
   implicit val lookupResultRowFormat = jsonFormat6(LookupResultRow)

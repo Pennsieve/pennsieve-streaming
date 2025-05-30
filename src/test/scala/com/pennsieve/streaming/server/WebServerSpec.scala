@@ -16,22 +16,23 @@
 
 package com.pennsieve.streaming.server
 
+import akka.actor.ActorSystem
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.model.StatusCodes.Unauthorized
-import akka.http.scaladsl.model.headers.{ Authorization, OAuth2BearerToken }
-import akka.http.scaladsl.model.ws.{ BinaryMessage, TextMessage }
-import akka.http.scaladsl.testkit.{ ScalatestRouteTest, WSProbe }
+import akka.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
+import akka.http.scaladsl.model.ws.{BinaryMessage, TextMessage}
+import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest, WSProbe}
 import com.pennsieve.auth.middleware.Jwt.Claim
 import com.pennsieve.auth.middleware.Jwt.Role.RoleIdentifier
-import com.pennsieve.auth.middleware.{ DatasetId, Jwt, OrganizationId, UserClaim, UserId }
+import com.pennsieve.auth.middleware.{DatasetId, Jwt, OrganizationId, UserClaim, UserId}
 import com.pennsieve.core.utilities.JwtAuthenticator._
 import com.pennsieve.models.Role
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.LocalFilesystemWsClient
 import com.pennsieve.streaming.server.TSJsonSupport._
-import com.pennsieve.streaming.{ SessionGenerator, TestConfig, TestDatabase }
+import com.pennsieve.streaming.{SessionGenerator, TestConfig, TestDatabase}
 import com.pennsieve.streaming.TimeSeriesMessage
-import org.scalatest.{ Inspectors, Matchers }
+import org.scalatest.{Inspectors, Matchers}
 import org.scalatest.fixture.WordSpec
 import shapeless.syntax.inject._
 import spray.json._
@@ -48,6 +49,9 @@ class WebServerSpec
     with TestConfig
     with SessionGenerator
     with TSJsonSupport {
+
+  implicit def default(implicit system: ActorSystem) = RouteTestTimeout(50.second)
+
   implicit val log = new ContextLogger()
   implicit val wsClient = new LocalFilesystemWsClient
   implicit val ports = new TestWebServerPorts
@@ -464,6 +468,91 @@ class WebServerSpec
 
         // no actual message will be sent
         testClient.inProbe.expectSubscription()
+      }
+    }
+
+    "custom montage should be applied when requested" in { implicit dbSession =>
+      val montagePackage = ports.MontagePackage
+
+      val testClient = WSProbe()
+      val tokenHeader = OAuth2BearerToken(ownerToken.value)
+
+      val url = s"/ts/query?package=$montagePackage"
+      WS(url, testClient.flow) ~> Authorization(tokenHeader) ~> new WebServer().route ~> check {
+        isWebSocketUpgrade shouldEqual true
+
+        val customMontageMap = List(("F3", "F1"), ("A1", "Cz"))
+        // a request to instruct the server to apply a montage
+        val montageRequest = TextMessage(
+          MontageRequest(
+            packageId = ports.InvalidMontagePackage,
+            montage = MontageType.CustomMontage(),
+            montageMap = Some(customMontageMap)
+          ).toJson.toString
+        )
+
+        testClient.sendMessage(montageRequest)
+        val virtualChannelsList = ports
+          .parseJsonFromMessage[ChannelsDetailsList](testClient.expectMessage())
+          .channelDetails
+          .map(vc => vc.id -> vc.name)
+
+        val expected = customMontageMap.map {
+          case (lead, secondary) =>
+            s"${lead}_id" -> Montage.getMontageName(lead, secondary)
+        }
+
+        virtualChannelsList should contain theSameElementsAs expected
+
+        val virtualChannelsToRequest = List(VirtualChannel(id = "F3_id", name = "F3"),VirtualChannel(id = "A1_id", name = "A1"))
+
+        val timeSeriesRequest = TextMessage(
+          TimeSeriesRequest(
+            packageId = montagePackage,
+            virtualChannels = Some(virtualChannelsToRequest),
+            startTime = 0,
+            endTime = 100,
+            pixelWidth = 1
+          ).toJson.toString
+        )
+
+        testClient.sendMessage(timeSeriesRequest)
+
+        // A message should be returned for each montage pair. These
+        // messages could come in any order.
+        val montagedChannels =
+          for (_ <- Range(0, virtualChannelsToRequest.length))
+            yield {
+              testClient.expectMessage() match {
+                case TextMessage.Strict(error) =>
+                  fail(
+                    s"Error encountered from test ws connection: ${error.parseJson.convertTo[TimeSeriesError]}"
+                  )
+                case BinaryMessage.Strict(message) =>
+                  TimeSeriesMessage.parseFrom(message.toArray)
+                case _ => fail("Unexpected message type")
+              }
+            }
+
+        val names = montagedChannels.map { msg =>
+          val leadChannel =
+            ports.MontageIds.find(_ == msg.segment.get.source).get
+          val name = msg.segment.get.channelName
+
+          val (leadName, secondaryName) =
+            Montage
+              .getMontagePair(name, MontageType.CustomMontage())
+              .right
+              .get
+          leadName should be(ports.MontageMap(leadChannel))
+
+          Montage.getMontageName(leadName, secondaryName)
+        }
+        val ids = montagedChannels.map(_.segment.get.source)
+
+        names should contain theSameElementsAs (virtualChannelsToRequest.map(_.name))
+        ids should contain theSameElementsAs (virtualChannelsToRequest.map(_.id))
+
       }
     }
 
