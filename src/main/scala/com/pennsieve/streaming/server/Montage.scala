@@ -25,7 +25,7 @@ import scala.collection.concurrent
 object Montage {
 
   // The separator between channel names for all montages
-  private val SEPARATOR = '-'
+  private val SEPARATOR = "<->"
 
   /** A complete list of all channels required for */
   def allMontageChannelNames: Set[String] =

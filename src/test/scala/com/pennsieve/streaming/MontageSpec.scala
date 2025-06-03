@@ -94,7 +94,7 @@ class MontageSpec extends FlatSpec with Matchers {
   }
 
   "getMontagePair" should "split channel names if is a montage" in {
-    val channelName = "montage-channel"
+    val channelName = "montage<->channel"
 
     val pair =
       Montage.getMontagePair(channelName, MontageType.ReferentialVsCz)
@@ -103,7 +103,7 @@ class MontageSpec extends FlatSpec with Matchers {
   }
 
   "getMontagePair" should "fail to split invalid channel names if there is a montage" in {
-    val channelName = "invalid-montage-channel"
+    val channelName = "invalid<->montage<->channel"
 
     val pair =
       Montage.getMontagePair(channelName, MontageType.ReferentialVsCz)
@@ -149,7 +149,7 @@ class MontageSpec extends FlatSpec with Matchers {
   }
 
   "buildMontage" should "fail with invalid channel names if is a montage" in {
-    val invalidNames = List("tricky-name", "really-invalid-name")
+    val invalidNames = List("tricky<->name", "really<->invalid<->name")
 
     val channelMap: Map[String, Channel] =
       invalidNames.map { channelName =>

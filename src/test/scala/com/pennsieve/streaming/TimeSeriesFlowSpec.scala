@@ -343,7 +343,7 @@ class TimeSeriesFlowSpec
   "montaged channels" should "be combined into a single data stream" in { implicit dbSession =>
     val leadChannelId = "Fp1_id"
 
-    val montageName = "Fp1-Cz"
+    val montageName = "Fp1<->Cz"
     val montageSession = "montage_session"
 
     val request = TextMessage(
