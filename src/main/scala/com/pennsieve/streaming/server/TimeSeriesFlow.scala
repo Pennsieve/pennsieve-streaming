@@ -298,7 +298,7 @@ class TimeSeriesFlow(
         packageMontages.remove(packageId)
       }
       case MontageRequest(packageId, MontageType.CustomMontage(), montageMap) => {
-        log.noContext.error("Getting custom Montage " + montageMap.get)
+        log.noContext.info("Getting custom Montage " + montageMap.get)
         val customMontage = MontageType.CustomMontage()
         customMontage.updatePairs(montageMap.get) // Set the custom pairs
         packageMontages.put(packageId, customMontage)
