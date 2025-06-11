@@ -17,7 +17,7 @@
 package com.pennsieve.streaming.query
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{ Source }
+import akka.stream.scaladsl.{ Sink, Source }
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 import com.pennsieve.streaming.server.Montage
@@ -149,7 +149,7 @@ class TimeSeriesQueryRawHttp(
         filtered = filter match {
           case Some(butterworth) => {
             filters.put(montageName, butterworth)
-            trimmed.map(butterworth.filter)
+            applyFilterWithPadding(trimmed, butterworth)
           }
           case None => trimmed
         }
@@ -167,6 +167,37 @@ class TimeSeriesQueryRawHttp(
           resampled
         )
       } yield tm
+    }
+  }
+
+  private def applyFilterWithPadding(
+    data: Source[Double, Any],
+    filter: Cascade
+  ): Source[Double, Any] = {
+    val padLength = 50
+
+    // Reset filter to clear any previous state
+    // TODO: improve by only padding and resetting when filter does not have an existing state.
+    filter.reset()
+
+    data.prefixAndTail(1).flatMapConcat {
+      case (firstElement, restOfStream) =>
+        if (firstElement.nonEmpty) {
+          val initialValue = firstElement.head
+
+          // Create padding source
+          val padding = Source.repeat(initialValue).take(padLength)
+
+          // Process padding through filter (to warm it up) but don't emit
+          val warmUpFilter = padding.map(filter.filter).runWith(Sink.ignore)
+
+          // Now process the actual data
+          Source.future(warmUpFilter).flatMapConcat { _ =>
+            Source(firstElement).concat(restOfStream).map(filter.filter)
+          }
+        } else {
+          Source.empty[Double]
+        }
     }
   }
 
