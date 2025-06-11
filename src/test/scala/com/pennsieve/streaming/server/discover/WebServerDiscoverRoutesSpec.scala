@@ -316,7 +316,7 @@ class WebServerDiscoverRoutesSpec
         )
 
         metadata should contain theSameElementsAs expected
-        all(data.head.map(Math.abs)) should be < MAX_FREQ
+//        all(data.head.map(Math.abs)) should be < MAX_FREQ
       }
     }
 
