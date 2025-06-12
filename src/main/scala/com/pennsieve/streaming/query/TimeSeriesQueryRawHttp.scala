@@ -22,7 +22,7 @@ import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 import com.pennsieve.streaming.server.Montage
 import com.pennsieve.streaming.{ Segment, TimeSeriesMessage }
-import com.pennsieve.streaming.server.filterStateTracker
+import com.pennsieve.streaming.server.FilterStateTracker
 import scala.collection.mutable
 import scala.concurrent.{ ExecutionContext, Future }
 
@@ -53,7 +53,7 @@ class TimeSeriesQueryRawHttp(
     */
   def rangeQuery(
     leadChannel: RangeRequest,
-    filters: mutable.Map[String, filterStateTracker],
+    filters: mutable.Map[String, FilterStateTracker],
     secondaryChannel: Option[RangeRequest] = None
   ): Future[TimeSeriesMessage] = {
     leadChannel.limit match {
@@ -109,7 +109,7 @@ class TimeSeriesQueryRawHttp(
   private def fetchDataStream(
     leadChannel: RangeRequest,
     limit: Option[Int],
-    filters: mutable.Map[String, filterStateTracker],
+    filters: mutable.Map[String, FilterStateTracker],
     secondaryChannel: Option[RangeRequest]
   ): Future[TimeSeriesMessage] = {
     time(
@@ -148,7 +148,29 @@ class TimeSeriesQueryRawHttp(
         filtered = filter match {
           case Some(butterworth) => {
             filters.put(montageName, butterworth)
-            applyFilterWithPadding(trimmed, butterworth)
+
+            // If the start time of the requested block is not consecutive then reset filter.
+            // difference between last end and current start > 100 samples
+            if (math.abs(butterworth.getLatestTimestamp - tstart) > (100 / leadChannel.lookUp.sampleRate) * 1e6) {
+              log.noContext.info(
+                s"Resetting filter ${math.abs(butterworth.getLatestTimestamp - tstart)} -- ${(100 / leadChannel.lookUp.sampleRate) * 1e6}"
+              )
+              butterworth.reset()
+            }
+
+            // Update the filter to track latest timestamp.
+            butterworth.setLatestTimestamp(tend)
+
+            // Calculate padLength in case of reset filter
+            val padLength = getFilterTransientLength(
+              butterworth.getFilterOrder,
+              butterworth.getMaxFilterFreq,
+              leadChannel.lookUp.sampleRate
+            )
+
+            // Apply filters
+            applyFilterWithPadding(trimmed, butterworth, padLength)
+
           }
           case None => trimmed
         }
@@ -177,12 +199,17 @@ class TimeSeriesQueryRawHttp(
     val conservativeCycles = 8.0 // 8 cycles is usually safe
     val orderFactor = 1.0 + (order - 1) * 0.5 // Linear scaling with order
 
+    log.noContext.info(
+      s"${samplingRate} - ${cutoffFreq} - ${cyclesAtCutoff} - ${conservativeCycles} - ${orderFactor} ---> ${cyclesAtCutoff * conservativeCycles * orderFactor}"
+    )
+
     (cyclesAtCutoff * conservativeCycles * orderFactor).ceil.toInt
   }
 
   private def applyFilterWithPadding(
     data: Source[Double, Any],
-    filter: filterStateTracker
+    filter: FilterStateTracker,
+    padLength: Int
   ): Source[Double, Any] = {
 
     // Reset filter to clear any previous state
@@ -190,8 +217,9 @@ class TimeSeriesQueryRawHttp(
       data.prefixAndTail(1).flatMapConcat {
         case (firstElement, restOfStream) =>
           if (firstElement.nonEmpty) {
-            val padLength = 500
             val initialValue = firstElement.head
+
+            log.noContext.info(s"FilterPadding: $padLength")
 
             // Create padding source
             val padding = Source.repeat(initialValue).take(padLength)

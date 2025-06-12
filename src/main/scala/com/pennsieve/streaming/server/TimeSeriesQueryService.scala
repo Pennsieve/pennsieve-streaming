@@ -56,7 +56,7 @@ class TimeSeriesQueryService(
   // A global map of session ids to filters that are active on
   // specific channels during that session
   val sessionFilters: SessionFilters =
-    new ConcurrentHashMap[String, concurrent.Map[String, filterStateTracker]]().asScala
+    new ConcurrentHashMap[String, concurrent.Map[String, FilterStateTracker]]().asScala
 
   // A global map of session ids to the montages that are active on
   // specific packages during that session
@@ -84,8 +84,8 @@ class TimeSeriesQueryService(
 
         val session = Jwt.generateToken(claim)(jwtConfig).value
         // initialize the filters for this session with an empty map
-        val channelFilters: concurrent.Map[String, filterStateTracker] =
-          new ConcurrentHashMap[String, filterStateTracker]().asScala
+        val channelFilters: concurrent.Map[String, FilterStateTracker] =
+          new ConcurrentHashMap[String, FilterStateTracker]().asScala
         sessionFilters.putIfAbsent(session, channelFilters)
 
         // initialize the montage for this session
