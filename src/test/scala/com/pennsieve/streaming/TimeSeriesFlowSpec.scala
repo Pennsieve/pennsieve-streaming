@@ -56,7 +56,7 @@ class TimeSeriesFlowSpec
   val unitRangeLookUp =
     new UnitRangeLookUp(ports.unitRangeLookupQuery, config.getString("timeseries.s3-base-url"))
   val sessionFilters: SessionFilters =
-    new ConcurrentHashMap[String, concurrent.Map[String, filterStateTracker]]().asScala
+    new ConcurrentHashMap[String, concurrent.Map[String, FilterStateTracker]]().asScala
   val montage: SessionMontage =
     new ConcurrentHashMap[String, concurrent.Map[String, MontageType]]().asScala
 
@@ -119,13 +119,13 @@ class TimeSeriesFlowSpec
     val channelName = ports.GenericNames.head
     val session = getRandomSession()
 
-    val channelFilters = new ConcurrentHashMap[String, filterStateTracker]().asScala
+    val channelFilters = new ConcurrentHashMap[String, FilterStateTracker]().asScala
     val MAX_FREQ = 1.0
 
     val butterworth = new Butterworth()
     butterworth.lowPass(4, 100, MAX_FREQ)
 
-    channelFilters.put(channelId, new filterStateTracker(butterworth))
+    channelFilters.put(channelId, new FilterStateTracker(butterworth, 4, MAX_FREQ))
     sessionFilters.put(session, channelFilters)
 
     // requests for two adjacent pages

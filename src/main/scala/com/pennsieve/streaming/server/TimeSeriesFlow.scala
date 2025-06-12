@@ -38,7 +38,7 @@ import com.pennsieve.streaming.{ RangeLookUp, TimeSeriesMessage, UnitRangeLookUp
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 import spray.json._
-import uk.me.berndporr.iirj.{ Butterworth, Cascade }
+import uk.me.berndporr.iirj.{ Butterworth }
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
@@ -52,7 +52,7 @@ object TimeSeriesFlow extends Directives with TSJsonSupport {
   type SessionFilters =
     scala.collection.concurrent.Map[
       String,
-      scala.collection.concurrent.Map[String, filterStateTracker]
+      scala.collection.concurrent.Map[String, FilterStateTracker]
     ]
   type SessionMontage =
     scala.collection.concurrent.Map[String, scala.collection.concurrent.Map[String, MontageType]]
@@ -111,7 +111,7 @@ class TimeSeriesFlow(
 
   // The filters that are active in the current session
   val channelFilters =
-    sessionFilters.getOrElse(session, new ConcurrentHashMap[String, filterStateTracker]().asScala)
+    sessionFilters.getOrElse(session, new ConcurrentHashMap[String, FilterStateTracker]().asScala)
 
   // The montages that are applied to packages in the current session
   var packageMontages =
@@ -258,20 +258,24 @@ class TimeSeriesFlow(
         )
       }
 
-  def buildFilter(filterRequest: FilterRequest, rate: Double): filterStateTracker = {
+  def buildFilter(filterRequest: FilterRequest, rate: Double): FilterStateTracker = {
     val filterorder = filterRequest.filterParameters.head.toInt
     val filterFreq = filterRequest.filterParameters(1)
     val butterworth = new Butterworth()
+
+    var maxFilterFreq = filterFreq
 
     filterRequest.filter.toLowerCase match {
 
       case "bandstop" =>
         val filterWidth = filterRequest.filterParameters(2)
         butterworth.bandStop(filterorder, rate, filterFreq, filterWidth)
+        maxFilterFreq = maxFilterFreq + filterWidth
 
       case "bandpass" =>
         val filterWidth = filterRequest.filterParameters(2)
         butterworth.bandPass(filterorder, rate, filterFreq, filterWidth)
+        maxFilterFreq = maxFilterFreq + filterWidth
 
       case "highpass" => butterworth.highPass(filterorder, rate, filterFreq)
 
@@ -280,7 +284,7 @@ class TimeSeriesFlow(
       case unknown =>
         log.noContext.error("Received unrecognized filter type:" + unknown)
     }
-    new filterStateTracker(butterworth)
+    new FilterStateTracker(butterworth, filterorder, maxFilterFreq)
   }
 
   def buildFilters(req: FilterRequest): Boolean = {
