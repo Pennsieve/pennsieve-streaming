@@ -149,6 +149,10 @@ class TimeSeriesQueryRawHttp(
           case Some(butterworth) => {
             filters.put(montageName, butterworth)
 
+            log.noContext.info(
+              s"Getting  ${math.abs(butterworth.getLatestTimestamp - tstart)} -- ${(100 / leadChannel.lookUp.sampleRate) * 1e6}"
+            )
+
             // If the start time of the requested block is not consecutive then reset filter.
             // difference between last end and current start > 100 samples
             if (math.abs(butterworth.getLatestTimestamp - tstart) > (100 / leadChannel.lookUp.sampleRate) * 1e6) {
