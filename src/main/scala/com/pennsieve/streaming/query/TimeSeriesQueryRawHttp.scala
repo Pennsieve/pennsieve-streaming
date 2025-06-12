@@ -22,8 +22,7 @@ import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 import com.pennsieve.streaming.server.Montage
 import com.pennsieve.streaming.{ Segment, TimeSeriesMessage }
-import uk.me.berndporr.iirj.Cascade
-
+import com.pennsieve.streaming.server.filterStateTracker
 import scala.collection.mutable
 import scala.concurrent.{ ExecutionContext, Future }
 
@@ -54,7 +53,7 @@ class TimeSeriesQueryRawHttp(
     */
   def rangeQuery(
     leadChannel: RangeRequest,
-    filters: mutable.Map[String, Cascade],
+    filters: mutable.Map[String, filterStateTracker],
     secondaryChannel: Option[RangeRequest] = None
   ): Future[TimeSeriesMessage] = {
     leadChannel.limit match {
@@ -110,7 +109,7 @@ class TimeSeriesQueryRawHttp(
   private def fetchDataStream(
     leadChannel: RangeRequest,
     limit: Option[Int],
-    filters: mutable.Map[String, Cascade],
+    filters: mutable.Map[String, filterStateTracker],
     secondaryChannel: Option[RangeRequest]
   ): Future[TimeSeriesMessage] = {
     time(
@@ -170,34 +169,46 @@ class TimeSeriesQueryRawHttp(
     }
   }
 
+  def getFilterTransientLength(order: Int, cutoffFreq: Double, samplingRate: Double): Int = {
+    // Simple conservative estimate
+    // Rule: 5-10 cycles of the cutoff frequency, scaled by filter order
+
+    val cyclesAtCutoff = samplingRate / cutoffFreq
+    val conservativeCycles = 8.0 // 8 cycles is usually safe
+    val orderFactor = 1.0 + (order - 1) * 0.5 // Linear scaling with order
+
+    (cyclesAtCutoff * conservativeCycles * orderFactor).ceil.toInt
+  }
+
   private def applyFilterWithPadding(
     data: Source[Double, Any],
-    filter: Cascade
+    filter: filterStateTracker
   ): Source[Double, Any] = {
-    val padLength = 50
 
     // Reset filter to clear any previous state
-    // TODO: improve by only padding and resetting when filter does not have an existing state.
-    filter.reset()
+    if (filter.isClean) {
+      data.prefixAndTail(1).flatMapConcat {
+        case (firstElement, restOfStream) =>
+          if (firstElement.nonEmpty) {
+            val padLength = 500
+            val initialValue = firstElement.head
 
-    data.prefixAndTail(1).flatMapConcat {
-      case (firstElement, restOfStream) =>
-        if (firstElement.nonEmpty) {
-          val initialValue = firstElement.head
+            // Create padding source
+            val padding = Source.repeat(initialValue).take(padLength)
 
-          // Create padding source
-          val padding = Source.repeat(initialValue).take(padLength)
+            // Process padding through filter (to warm it up) but don't emit
+            val warmUpFilter = padding.map(filter.filter).runWith(Sink.ignore)
 
-          // Process padding through filter (to warm it up) but don't emit
-          val warmUpFilter = padding.map(filter.filter).runWith(Sink.ignore)
-
-          // Now process the actual data
-          Source.future(warmUpFilter).flatMapConcat { _ =>
-            Source(firstElement).concat(restOfStream).map(filter.filter)
+            // Now process the actual data
+            Source.future(warmUpFilter).flatMapConcat { _ =>
+              Source(firstElement).concat(restOfStream).map(filter.filter)
+            }
+          } else {
+            Source.empty[Double]
           }
-        } else {
-          Source.empty[Double]
-        }
+      }
+    } else {
+      data.map(filter.filter)
     }
   }
 

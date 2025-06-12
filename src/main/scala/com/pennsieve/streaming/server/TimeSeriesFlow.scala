@@ -50,7 +50,10 @@ import scala.util.{ Failure, Success, Try }
   */
 object TimeSeriesFlow extends Directives with TSJsonSupport {
   type SessionFilters =
-    scala.collection.concurrent.Map[String, scala.collection.concurrent.Map[String, Cascade]]
+    scala.collection.concurrent.Map[
+      String,
+      scala.collection.concurrent.Map[String, filterStateTracker]
+    ]
   type SessionMontage =
     scala.collection.concurrent.Map[String, scala.collection.concurrent.Map[String, MontageType]]
 
@@ -108,7 +111,7 @@ class TimeSeriesFlow(
 
   // The filters that are active in the current session
   val channelFilters =
-    sessionFilters.getOrElse(session, new ConcurrentHashMap[String, Cascade]().asScala)
+    sessionFilters.getOrElse(session, new ConcurrentHashMap[String, filterStateTracker]().asScala)
 
   // The montages that are applied to packages in the current session
   var packageMontages =
@@ -255,7 +258,7 @@ class TimeSeriesFlow(
         )
       }
 
-  def buildFilter(filterRequest: FilterRequest, rate: Double): Cascade = {
+  def buildFilter(filterRequest: FilterRequest, rate: Double): filterStateTracker = {
     val filterorder = filterRequest.filterParameters.head.toInt
     val filterFreq = filterRequest.filterParameters(1)
     val butterworth = new Butterworth()
@@ -277,7 +280,7 @@ class TimeSeriesFlow(
       case unknown =>
         log.noContext.error("Received unrecognized filter type:" + unknown)
     }
-    butterworth
+    new filterStateTracker(butterworth)
   }
 
   def buildFilters(req: FilterRequest): Boolean = {
