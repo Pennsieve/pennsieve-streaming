@@ -49,19 +49,19 @@ object Boot extends App {
 
   val api = new WebServer
 
-//  val idleTimeout = config.getDuration("timeseries.idle-timeout")
+  val idleTimeout = config.getDuration("timeseries.idle-timeout")
 
-//  val serverSettings = ServerSettings(system)
+  val serverSettings = ServerSettings(system)
 
   val routes: Route = Route.seal(api.route)
 
-//  // this long idle needs to be twice what is configured so that to custom timeout system can work.
-//  // otherwise, they both kill it at the same time, and we never have a change to clean up
-//  val longIdle = FiniteDuration(idleTimeout.toNanos, TimeUnit.NANOSECONDS) + FiniteDuration(
-//    idleTimeout.toNanos,
-//    TimeUnit.NANOSECONDS
-//  )
-//  serverSettings.withIdleTimeout(longIdle) //lame that this is mutable
+  // this long idle needs to be twice what is configured so that to custom timeout system can work.
+  // otherwise, they both kill it at the same time, and we never have a change to clean up
+  val longIdle = FiniteDuration(idleTimeout.toNanos, TimeUnit.NANOSECONDS) + FiniteDuration(
+    idleTimeout.toNanos,
+    TimeUnit.NANOSECONDS
+  )
+  serverSettings.withIdleTimeout(longIdle) //lame that this is mutable
 
   val bindPort = config.getInt("timeseries.bind-port")
   val bindAddress = config.getString("timeseries.bind-address")
