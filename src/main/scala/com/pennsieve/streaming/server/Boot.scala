@@ -22,7 +22,6 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.settings.ServerSettings
-import akka.actor.ActorSystem
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.S3WsClient
 import com.typesafe.config.{ Config, ConfigFactory }
@@ -38,9 +37,7 @@ object Boot extends App {
 
   DBsWithEnv("postgresTS").setupAll()
 
-  implicit val system = ActorSystem("system", ConfigFactory.load())
-
-//  implicit val system = ActorSystem("system")
+  implicit val system = ActorSystem("system")
 
   implicit val dbSession = AutoSession
 
