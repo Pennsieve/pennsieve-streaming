@@ -38,7 +38,9 @@ object Boot extends App {
 
   DBsWithEnv("postgresTS").setupAll()
 
-  implicit val system = ActorSystem("system")
+  implicit val system = ActorSystem("system", ConfigFactory.load())
+
+//  implicit val system = ActorSystem("system")
 
   implicit val dbSession = AutoSession
 

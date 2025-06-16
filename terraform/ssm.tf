@@ -59,7 +59,7 @@ resource "aws_ssm_parameter" "timeseries_address" {
 resource "aws_ssm_parameter" "idle_timeout" {
   name  = "/${var.environment_name}/${var.service_name}/idle-timeout"
   type  = "String"
-  value = "2m"
+  value = "3600s"
 }
 
 resource "aws_ssm_parameter" "default_gap_threshold" {
