@@ -176,11 +176,14 @@ class TimeSeriesQueryRawHttp(
             applyFilterWithPadding(trimmed, butterworth, padLength)
 
           }
-          case None => trimmed
+          case None => Future.successful(trimmed)
         }
 
         // take up to the given limit
-        limited = limit.map(l => filtered.take(l)).getOrElse(filtered)
+        limited <- filtered.flatMap(_.runWith(Sink.seq)).map { seq =>
+          val limitedSeq = limit.map(l => seq.take(l)).getOrElse(seq)
+          Source(limitedSeq)
+        }
 
         // return a timeseries message
         tm <- buildTimeSeriesMessage(
@@ -195,7 +198,11 @@ class TimeSeriesQueryRawHttp(
     }
   }
 
-  def getFilterTransientLength(order: Int, cutoffFreq: Double, samplingRate: Double): Int = {
+  private def getFilterTransientLength(
+    order: Int,
+    cutoffFreq: Double,
+    samplingRate: Double
+  ): Int = {
     // Simple conservative estimate
     // Rule: 5-10 cycles of the cutoff frequency, scaled by filter order
 
@@ -204,7 +211,7 @@ class TimeSeriesQueryRawHttp(
     val orderFactor = 1.0 + (order - 1) * 0.5 // Linear scaling with order
 
     log.noContext.info(
-      s"${samplingRate} - ${cutoffFreq} - ${cyclesAtCutoff} - ${conservativeCycles} - ${orderFactor} ---> ${cyclesAtCutoff * conservativeCycles * orderFactor}"
+      s"FilterInfo: sf:${samplingRate} - cutoff:${cutoffFreq} - cyclesAtCutoff${cyclesAtCutoff} - consCycles:${conservativeCycles} - orderFactor:${orderFactor} ---> total:${cyclesAtCutoff * conservativeCycles * orderFactor}"
     )
 
     (cyclesAtCutoff * conservativeCycles * orderFactor).ceil.toInt
@@ -214,33 +221,94 @@ class TimeSeriesQueryRawHttp(
     data: Source[Double, Any],
     filter: FilterStateTracker,
     padLength: Int
-  ): Source[Double, Any] = {
+  ): Future[Source[Double, Any]] = {
 
     // Reset filter to clear any previous state
     if (filter.isClean) {
-      data.prefixAndTail(1).flatMapConcat {
-        case (firstElement, restOfStream) =>
-          if (firstElement.nonEmpty) {
-            val initialValue = firstElement.head
+      log.noContext.info(s"Filter in init state: adding padding with length: $padLength")
+      // Materialize the data to work with it
+      data.runWith(Sink.seq).map { dataSeq =>
+        val dataVector = dataSeq.toVector
 
-            log.noContext.info(s"FilterPadding: $padLength")
+        if (dataVector.nonEmpty) {
+          // Create reflected prewarm vector
+          val prewarmVector = createReflectedPrewarmVector(dataVector, padLength)
 
-            // Create padding source
-            val padding = Source.repeat(initialValue).take(padLength)
+          // Apply prewarming (process but don't emit these values)
+          prewarmVector.foreach(filter.filter)
 
-            // Process padding through filter (to warm it up) but don't emit
-            val warmUpFilter = padding.map(filter.filter).runWith(Sink.ignore)
-
-            // Now process the actual data
-            Source.future(warmUpFilter).flatMapConcat { _ =>
-              Source(firstElement).concat(restOfStream).map(filter.filter)
-            }
-          } else {
-            Source.empty[Double]
-          }
+          // Now process actual data with warmed-up filter
+          val processedData = dataVector.map(filter.filter)
+          Source(processedData)
+        } else {
+          Source.empty[Double]
+        }
       }
     } else {
-      data.map(filter.filter)
+      // Filter already warmed up, just apply filtering
+      Future.successful(data.map(filter.filter))
+    }
+  }
+
+  /**
+    * Create reflected prewarm vector from the beginning of the original signal
+    * Simple approach: take the first N samples and reverse them
+    */
+  private def createReflectedPrewarmVector(
+    originalData: Vector[Double],
+    requiredLength: Int
+  ): Vector[Double] = {
+
+    if (originalData.isEmpty) {
+      // If no data, return zeros
+      return Vector.fill(requiredLength)(0.0)
+    }
+
+    if (originalData.length == 1) {
+      // Single value: repeat that value
+      return Vector.fill(requiredLength)(originalData.head)
+    }
+
+    if (originalData.length >= requiredLength) {
+      // Sufficient data: take first 'requiredLength' samples and reverse them
+      originalData.take(requiredLength).reverse
+    } else {
+      // Insufficient data: reflect what we have and pad as needed
+      createReflectedWithPadding(originalData, requiredLength)
+    }
+  }
+
+  /**
+    * Handle case where original data is shorter than required warmup length
+    */
+  private def createReflectedWithPadding(
+    originalData: Vector[Double],
+    requiredLength: Int
+  ): Vector[Double] = {
+
+    val dataLength = originalData.length
+
+    if (dataLength >= requiredLength / 2) {
+      // We have at least half the required length
+      // Reflect the data and take what we need
+      val reflected = originalData.reverse
+      val combined = reflected ++ originalData
+
+      if (combined.length >= requiredLength) {
+        combined.take(requiredLength)
+      } else {
+        // Still not enough, pad with edge values
+        val padding = Vector.fill(requiredLength - combined.length)(originalData.head)
+        padding ++ combined.take(requiredLength - padding.length)
+      }
+    } else {
+      // Very short data: repeat the reflection pattern
+      val reflected = originalData.reverse
+      val pattern = reflected ++ originalData
+
+      // Repeat the pattern until we have enough samples
+      val repeated = Iterator.continually(pattern).flatten.take(requiredLength).toVector
+      repeated
     }
   }
 
