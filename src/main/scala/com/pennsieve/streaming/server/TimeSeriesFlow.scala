@@ -376,40 +376,6 @@ class TimeSeriesFlow(
       Try(msg.parseJson.convertTo[KeepAlive]).map(killInactive _)
   }
 
-  // Helper method to safely abort other flows, keeping the last 3
-  private def abortOtherFlows(): Unit = {
-    // Create a snapshot of current killswitches to avoid concurrent modification
-    val killSwitchSnapshot = killSwitches.toMap
-
-    // Sort by timestamp (key) in descending order to get newest first
-    val sortedFlows = killSwitchSnapshot.toSeq.sortBy(_._1)(Ordering.Long.reverse)
-
-    // Keep the current flow plus the last 2 flows (4 total)
-    // This means we keep flows at indices 0, 1, 2, 3 if current flow is at index 0
-    val flowsToKeep = sortedFlows.take(1).map(_._1).toSet + flowId
-
-    // Find flows to abort (anything not in the keep set)
-    val flowsToAbort = killSwitchSnapshot.filterKeys(!flowsToKeep.contains(_))
-
-    log.noContext.debug(s"Session $session: Keeping ${flowsToKeep.size} flows (${flowsToKeep.mkString(", ")}), aborting ${flowsToAbort.size} flows")
-
-    flowsToAbort.foreach { case (key, killSwitch) =>
-      try {
-        log.noContext.debug(s"Aborting flow $key from session $session (triggered by flow $flowId)")
-        killSwitch.abort(new RuntimeException(s"Flow $key aborted by new request in flow $flowId - keeping only last 3 flows"))
-        // Remove the aborted killswitch from the map
-        killSwitches.remove(key)
-      } catch {
-        case ex: Exception =>
-          log.noContext.warn(s"Failed to abort flow $key: ${ex.getMessage}")
-          // Still remove it from the map even if abort failed
-          killSwitches.remove(key)
-      }
-    }
-
-    log.noContext.debug(s"Active flows after abortion: ${killSwitches.keys.toSeq.sorted.mkString(", ")}")
-  }
-
   def parseFlow: Flow[Message, WithError[Respondable], NotUsed] =
     Flow[Message]
       .throttle(throttleItems, throttlePeriod.second, throttleItems, Shaping)
@@ -418,36 +384,105 @@ class TimeSeriesFlow(
       .mapAsync(1) {
         case textMessage: TextMessage =>
           textMessage.toStrict(10 seconds).map { message =>
-            val respondable = Try(message.text.parseJson.convertTo[TimeSeriesRequest]) orElse Try(
-              message.text.parseJson.convertTo[MontageRequest]
-            )
+            val timeSeriesRequest = Try(message.text.parseJson.convertTo[TimeSeriesRequest])
+            val montageRequest = Try(message.text.parseJson.convertTo[MontageRequest])
 
-            // if we didn't get respondable request, attempt to parse
-            // all other options
-            if (respondable.isFailure) perform(message.text) match {
-              case Success(_) => Right(None)
-              case Failure(_) =>
-                Left(
-                  TimeSeriesException
-                    .UnexpectedError(s"unsupported message received: $message")
-                )
-            } else {
-              // This is a respondable so kill any previous flows
-              abortOtherFlows()
-
+            // Check if we got a successful respondable request
+            if (timeSeriesRequest.isSuccess || montageRequest.isSuccess) {
               lastActive = System.currentTimeMillis() //only valid requests for data keep the flow alive
-              Right(respondable.toOption)
+              // Explicitly handle each type to ensure proper Respondable casting
+              timeSeriesRequest match {
+                case Success(tsr) => Right(Some(tsr: Respondable))
+                case Failure(_) =>
+                  montageRequest match {
+                    case Success(mr) => Right(Some(mr: Respondable))
+                    case Failure(_) =>
+                      Right(None) // This shouldn't happen given the outer condition
+                  }
+              }
+            } else {
+              // if we didn't get respondable request, attempt to parse all other options
+              perform(message.text) match {
+                case Success(_) => Right(None)
+                case Failure(_) =>
+                  Left(
+                    TimeSeriesException
+                      .UnexpectedError(s"unsupported message received: $message")
+                  )
+              }
             }
           }
         case _: BinaryMessage =>
           Future.successful(
             Left(
               TimeSeriesException
-                .UnexpectedError("recieved unexpected binary message")
+                .UnexpectedError("received unexpected binary message")
             )
           )
       }
       .via(EitherOptionFilter)
+      .conflateWithSeed(identity) { (previous, current) =>
+        // Always keep the current (latest) message
+        current
+      }
+
+//  def parseFlow: Flow[Message, WithError[Respondable], NotUsed] =
+//    Flow[Message]
+//      .throttle(throttleItems, throttlePeriod.second, throttleItems, Shaping)
+//      .via(killswitch.flow)
+//      .keepAlive(15.seconds, () => TextMessage.Strict(new KeepAlive().toJson.toString))
+//      .mapAsync(1) {
+//        case textMessage: TextMessage =>
+//          textMessage.toStrict(10 seconds).map { message =>
+//            val timeSeriesRequest = Try(message.text.parseJson.convertTo[TimeSeriesRequest])
+//            val montageRequest = Try(message.text.parseJson.convertTo[MontageRequest])
+//
+//            // if we didn't get respondable request, attempt to parse
+//            // all other options
+//            if (timeSeriesRequest.isSuccess || montageRequest.isSuccess) {
+//              lastActive = System.currentTimeMillis() //only valid requests for data keep the flow alive
+//              // Explicitly handle each type to ensure proper Respondable casting
+//              timeSeriesRequest match {
+//                case Success(tsr) => Right(Some(tsr: Respondable))
+//                case Failure(_) =>
+//                  montageRequest match {
+//                    case Success(mr) => Right(Some(mr: Respondable))
+//                    case Failure(_) =>
+//                      Right(None) // This shouldn't happen given the outer condition
+//                  }
+//              }
+//            } else {
+//              // if we didn't get respondable request, attempt to parse all other options
+//              perform(message.text) match {
+//                case Success(_) => Right(None)
+//                case Failure(_) =>
+//                  Left(
+//                    TimeSeriesException
+//                      .UnexpectedError(s"unsupported message received: $message")
+//                  )
+//              }
+//            }
+//          }
+//        case _: BinaryMessage =>
+//          Future.successful(
+//            Left(
+//              TimeSeriesException
+//                .UnexpectedError("recieved unexpected binary message")
+//            )
+//          )
+//      }
+//      .via(EitherOptionFilter)
+//      .conflateWithSeed(identity) { (previous, current) =>
+//        current match {
+//          case Right(Some(_)) =>
+//            // Since all Some(_) values here should be Respondable types (TimeSeriesRequest or MontageRequest),
+//            // we can simply keep the latest one
+//            log.noContext.debug("Discarding previous Respondable message due to newer one")
+//            current // Keep the newer Respondable, discard the previous
+//          case _ =>
+//            previous // Keep non-Respondable messages (like None from filters/keepalives)
+//        }
+//      }
 
   val dualQueryExecutor
     : Graph[FlowShape[TimeSeriesRequest, WithError[TimeSeriesMessage]], NotUsed] =
