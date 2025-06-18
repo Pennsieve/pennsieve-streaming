@@ -19,21 +19,26 @@ package com.pennsieve.streaming.server
 import java.util.concurrent.ConcurrentHashMap
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
-import akka.http.scaladsl.server.{Directives, Route}
+import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
+import akka.http.scaladsl.server.{ Directives, Route }
 import akka.stream.ThrottleMode.Shaping
-import akka.stream.scaladsl.{Flow, GraphDSL, Merge}
-import akka.stream.{FlowShape, Graph, KillSwitches, OverflowStrategy, SharedKillSwitch}
+import akka.stream.scaladsl.{ Flow, GraphDSL, Merge }
+import akka.stream.{ FlowShape, Graph, KillSwitches, OverflowStrategy, SharedKillSwitch }
 import akka.util.ByteString
 import cats.data.EitherT
 import cats.implicits._
 import com.pennsieve.models.Channel
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query._
-import com.pennsieve.streaming.server.StreamUtils.{EitherOptionFilter, splitMerge}
+import com.pennsieve.streaming.server.StreamUtils.{ splitMerge, EitherOptionFilter }
 import com.pennsieve.streaming.server.TSJsonSupport._
-import com.pennsieve.streaming.server.TimeSeriesFlow.{SessionFilters, SessionKillSwitches, SessionMontage, WithError}
-import com.pennsieve.streaming.{RangeLookUp, TimeSeriesMessage, UnitRangeLookUp}
+import com.pennsieve.streaming.server.TimeSeriesFlow.{
+  SessionFilters,
+  SessionKillSwitches,
+  SessionMontage,
+  WithError
+}
+import com.pennsieve.streaming.{ RangeLookUp, TimeSeriesMessage, UnitRangeLookUp }
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 import spray.json._
@@ -41,8 +46,8 @@ import uk.me.berndporr.iirj.Butterworth
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success, Try}
+import scala.concurrent.{ ExecutionContext, Future }
+import scala.util.{ Failure, Success, Try }
 
 /**
   * Created by jsnavely on 2/7/17.
@@ -114,7 +119,7 @@ class TimeSeriesFlow(
 
   val inactiveTimeout = config.getDuration("timeseries.idle-timeout")
 
-  val maxMessageQueue = config.getInt("max-message-queue-ts-query")
+  val maxMessageQueue = config.getInt("timeseries.max-message-queue")
 
   var lastActive = System.currentTimeMillis()
 
