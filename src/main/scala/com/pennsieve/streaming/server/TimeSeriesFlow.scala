@@ -17,14 +17,13 @@
 package com.pennsieve.streaming.server
 
 import java.util.concurrent.ConcurrentHashMap
-
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
 import akka.http.scaladsl.server.{ Directives, Route }
 import akka.stream.ThrottleMode.Shaping
 import akka.stream.scaladsl.{ Flow, GraphDSL, Merge }
-import akka.stream.{ FlowShape, Graph, KillSwitches }
+import akka.stream.{ FlowShape, Graph, KillSwitches, SharedKillSwitch }
 import akka.util.ByteString
 import cats.data.EitherT
 import cats.implicits._
@@ -33,12 +32,17 @@ import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query._
 import com.pennsieve.streaming.server.StreamUtils.{ splitMerge, EitherOptionFilter }
 import com.pennsieve.streaming.server.TSJsonSupport._
-import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage, WithError }
+import com.pennsieve.streaming.server.TimeSeriesFlow.{
+  SessionFilters,
+  SessionKillSwitches,
+  SessionMontage,
+  WithError
+}
 import com.pennsieve.streaming.{ RangeLookUp, TimeSeriesMessage, UnitRangeLookUp }
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 import spray.json._
-import uk.me.berndporr.iirj.{ Butterworth }
+import uk.me.berndporr.iirj.Butterworth
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
@@ -56,6 +60,11 @@ object TimeSeriesFlow extends Directives with TSJsonSupport {
     ]
   type SessionMontage =
     scala.collection.concurrent.Map[String, scala.collection.concurrent.Map[String, MontageType]]
+
+  type SessionKillSwitches =
+    scala.collection.concurrent.Map[String, scala.collection.concurrent.Map[Long, SharedKillSwitch]]
+
+//  type flowId = Long
 
   type WithError[B] = Either[TimeSeriesException, B]
   type WithErrorT[B] = EitherT[Future, TimeSeriesException, B]
@@ -83,6 +92,7 @@ class TimeSeriesFlow(
   session: String,
   sessionFilters: SessionFilters,
   sessionMontage: SessionMontage,
+  sessionKillSwitches: SessionKillSwitches,
   channelMap: Map[String, Channel],
   rangeLookup: RangeLookUp,
   unitRangeLookUp: UnitRangeLookUp,
@@ -95,6 +105,8 @@ class TimeSeriesFlow(
   config: Config,
   wsClient: WsClient
 ) extends TSJsonSupport {
+
+  val flowId: Long = System.currentTimeMillis()
 
   val continuousQueryExecutor = new TimeSeriesQueryRawHttp(wsClient)
 
@@ -116,6 +128,10 @@ class TimeSeriesFlow(
   // The montages that are applied to packages in the current session
   var packageMontages =
     sessionMontage.getOrElse(session, new ConcurrentHashMap[String, MontageType]().asScala)
+
+  // Get killswitches for current session
+  var killSwitches =
+    sessionKillSwitches.getOrElse(session, new ConcurrentHashMap[Long, SharedKillSwitch]().asScala)
 
   val packageMinimumTime = channelMap.values.map(_.start).min
 
@@ -337,6 +353,7 @@ class TimeSeriesFlow(
   }
 
   val killswitch = KillSwitches.shared(session)
+  killSwitches.put(flowId, killswitch)
 
   def killInactive(req: KeepAlive): Boolean = {
     val freshness = req.currentTime - lastActive
@@ -357,6 +374,40 @@ class TimeSeriesFlow(
       Try(msg.parseJson.convertTo[ResetFilterRequest])
         .map(resetFilters _) orElse
       Try(msg.parseJson.convertTo[KeepAlive]).map(killInactive _)
+  }
+
+  // Helper method to safely abort other flows, keeping the last 3
+  private def abortOtherFlows(): Unit = {
+    // Create a snapshot of current killswitches to avoid concurrent modification
+    val killSwitchSnapshot = killSwitches.toMap
+
+    // Sort by timestamp (key) in descending order to get newest first
+    val sortedFlows = killSwitchSnapshot.toSeq.sortBy(_._1)(Ordering.Long.reverse)
+
+    // Keep the current flow plus the last 2 flows (4 total)
+    // This means we keep flows at indices 0, 1, 2, 3 if current flow is at index 0
+    val flowsToKeep = sortedFlows.take(1).map(_._1).toSet + flowId
+
+    // Find flows to abort (anything not in the keep set)
+    val flowsToAbort = killSwitchSnapshot.filterKeys(!flowsToKeep.contains(_))
+
+    log.noContext.debug(s"Session $session: Keeping ${flowsToKeep.size} flows (${flowsToKeep.mkString(", ")}), aborting ${flowsToAbort.size} flows")
+
+    flowsToAbort.foreach { case (key, killSwitch) =>
+      try {
+        log.noContext.debug(s"Aborting flow $key from session $session (triggered by flow $flowId)")
+        killSwitch.abort(new RuntimeException(s"Flow $key aborted by new request in flow $flowId - keeping only last 3 flows"))
+        // Remove the aborted killswitch from the map
+        killSwitches.remove(key)
+      } catch {
+        case ex: Exception =>
+          log.noContext.warn(s"Failed to abort flow $key: ${ex.getMessage}")
+          // Still remove it from the map even if abort failed
+          killSwitches.remove(key)
+      }
+    }
+
+    log.noContext.debug(s"Active flows after abortion: ${killSwitches.keys.toSeq.sorted.mkString(", ")}")
   }
 
   def parseFlow: Flow[Message, WithError[Respondable], NotUsed] =
@@ -381,6 +432,9 @@ class TimeSeriesFlow(
                     .UnexpectedError(s"unsupported message received: $message")
                 )
             } else {
+              // This is a respondable so kill any previous flows
+              abortOtherFlows()
+
               lastActive = System.currentTimeMillis() //only valid requests for data keep the flow alive
               Right(respondable.toOption)
             }
@@ -580,6 +634,9 @@ class TimeSeriesFlow(
       // is not eligible for the given montage.
       val montageLister = builder.add(listMontageChannels)
 
+      // Convert parse errors to text messages
+      val errorConverter = builder.add(Flow[TimeSeriesException].map(e => TextMessage(e.json)))
+
       // merge all responses back into a single outgoing flow
       val merge = builder.add(Merge[Message](3))
 
@@ -588,9 +645,11 @@ class TimeSeriesFlow(
 
                     timeSeriesRequestOut ~> requestTimestampResetter  ~> queryer ~> responseTimestampResetter ~> wsMessageConverter  ~> merge
                     montageRequestOut ~> montageLister                                                                               ~> merge
-                    parseErrorsOut.map(e => TextMessage(e.json))                                                                     ~> merge
+                    parseErrorsOut ~> errorConverter                                                                                 ~> merge
       // format: on
 
       FlowShape(parser.in, merge.out)
+
     }
+
 }

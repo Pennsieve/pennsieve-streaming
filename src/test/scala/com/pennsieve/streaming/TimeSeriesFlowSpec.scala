@@ -17,16 +17,20 @@
 package com.pennsieve.streaming
 
 import java.util.concurrent.ConcurrentHashMap
-
 import akka.http.scaladsl.model.ws.TextMessage.Strict
 import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
+import akka.stream.SharedKillSwitch
 import akka.stream.scaladsl.{ Sink, Source }
 import com.pennsieve.models.Channel
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.{ LocalFilesystemWsClient, TimeSeriesQueryUtils }
 import com.pennsieve.streaming.query.TimeSeriesQueryUtils._
 import com.pennsieve.streaming.server.TSJsonSupport._
-import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage }
+import com.pennsieve.streaming.server.TimeSeriesFlow.{
+  SessionFilters,
+  SessionKillSwitches,
+  SessionMontage
+}
 import com.pennsieve.streaming.server._
 import org.scalatest.{ Inspectors, Matchers }
 import org.scalatest.fixture.FlatSpec
@@ -60,6 +64,9 @@ class TimeSeriesFlowSpec
   val montage: SessionMontage =
     new ConcurrentHashMap[String, concurrent.Map[String, MontageType]]().asScala
 
+  val sessionKillSwitches: SessionKillSwitches =
+    new ConcurrentHashMap[String, concurrent.Map[Long, SharedKillSwitch]]().asScala
+
   "paginated channel data" should "stream through the system unaffected" in { implicit dbSession =>
     val channelId = ports.GenericIds.head
     val channelName = ports.GenericNames.head
@@ -82,6 +89,7 @@ class TimeSeriesFlowSpec
       session,
       sessionFilters,
       montage,
+      sessionKillSwitches,
       channelMap = ports
         .packageMap(ports.GenericPackage)
         .map(chan => chan.nodeId -> chan)
@@ -145,6 +153,7 @@ class TimeSeriesFlowSpec
       session,
       sessionFilters,
       montage,
+      sessionKillSwitches,
       channelMap = ports
         .packageMap(ports.GenericPackage)
         .map(chan => chan.nodeId -> chan)
@@ -213,6 +222,7 @@ class TimeSeriesFlowSpec
         session,
         sessionFilters,
         montage,
+        sessionKillSwitches,
         channelMap = ports
           .packageMap(ports.GenericPackage)
           .map(chan => chan.nodeId -> chan)
@@ -282,6 +292,7 @@ class TimeSeriesFlowSpec
         session,
         sessionFilters,
         montage,
+        sessionKillSwitches,
         channelMap = ports
           .packageMap(ports.GenericPackage)
           .map(chan => chan.nodeId -> chan)
@@ -366,6 +377,7 @@ class TimeSeriesFlowSpec
       montageSession,
       sessionFilters,
       montage,
+      sessionKillSwitches,
       channelMap = ports.MontageIds.map(id => id -> ports.createDummyChannel(id)).toMap,
       rangeLookUp,
       unitRangeLookUp
@@ -405,6 +417,7 @@ class TimeSeriesFlowSpec
         getRandomSession(),
         sessionFilters,
         montage,
+        sessionKillSwitches,
         ports.NonexistentChannelIds
           .map(id => id -> ports.createDummyChannel(id))
           .toMap,
@@ -462,6 +475,7 @@ class TimeSeriesFlowSpec
           getRandomSession(),
           sessionFilters,
           montage,
+          sessionKillSwitches,
           cmap,
           rangeLookUp,
           unitRangeLookUp

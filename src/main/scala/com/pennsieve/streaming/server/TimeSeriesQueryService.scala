@@ -18,12 +18,17 @@ package com.pennsieve.streaming.server
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.server.Route
+import akka.stream.SharedKillSwitch
 import akka.stream.scaladsl.{ Flow, Sink }
 import com.pennsieve.auth.middleware.Jwt
 import com.pennsieve.auth.middleware.Jwt.Claim
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query.WsClient
-import com.pennsieve.streaming.server.TimeSeriesFlow.{ SessionFilters, SessionMontage }
+import com.pennsieve.streaming.server.TimeSeriesFlow.{
+  SessionFilters,
+  SessionKillSwitches,
+  SessionMontage
+}
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 import uk.me.berndporr.iirj.Cascade
@@ -63,6 +68,9 @@ class TimeSeriesQueryService(
   val sessionMontages: SessionMontage =
     new ConcurrentHashMap[String, concurrent.Map[String, MontageType]]().asScala
 
+  val sessionKillSwitches: SessionKillSwitches =
+    new ConcurrentHashMap[String, concurrent.Map[Long, SharedKillSwitch]]().asScala
+
   val rangeLookUp =
     new RangeLookUp(ports.rangeLookupQuery, config.getString("timeseries.s3-base-url"))
 
@@ -93,6 +101,11 @@ class TimeSeriesQueryService(
           new ConcurrentHashMap[String, MontageType]().asScala
         sessionMontages.putIfAbsent(session, packageMontages)
 
+        // initialize the killswitches for this session
+        val killSwitch: concurrent.Map[Long, SharedKillSwitch] =
+          new ConcurrentHashMap[Long, SharedKillSwitch]().asScala
+        sessionKillSwitches.putIfAbsent(session, killSwitch)
+
         val startAtEpoch =
           startAtEpochParam.exists(_.toLowerCase.trim() == "true")
 
@@ -100,6 +113,7 @@ class TimeSeriesQueryService(
           session,
           sessionFilters,
           sessionMontages,
+          sessionKillSwitches,
           channelMap = cmap,
           rangeLookup = rangeLookUp,
           unitRangeLookUp = unitRangeLookUp,
@@ -109,6 +123,10 @@ class TimeSeriesQueryService(
         Flow
           .fromGraph(tsFlow.flowGraph)
           .alsoTo(Sink.onComplete { _ =>
+            // Remove kill-switch from session kill-switch map
+            val removedId = killSwitch.remove(tsFlow.flowId)
+
+            log.context.info(s"Removed Id: $removedId from switch map")(logContext)
             log.context
               .info(s"Graph complete for session: $session")(logContext)
             connectionCounter.decrementAndGet()
