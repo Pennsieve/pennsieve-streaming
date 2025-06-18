@@ -88,6 +88,12 @@ resource "aws_ssm_parameter" "akka_stream_debug_logging" {
   value = "off"
 }
 
+resource "aws_ssm_parameter" "max_message_queue_size" {
+  name  = "/${var.environment_name}/${var.service_name}/max-message-queue"
+  type  = "String"
+  value = "3"
+}
+
 # POSTGRES
 
 resource "aws_ssm_parameter" "data_postgres_database" {

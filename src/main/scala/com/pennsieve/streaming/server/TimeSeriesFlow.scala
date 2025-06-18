@@ -19,26 +19,21 @@ package com.pennsieve.streaming.server
 import java.util.concurrent.ConcurrentHashMap
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
-import akka.http.scaladsl.server.{ Directives, Route }
+import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
+import akka.http.scaladsl.server.{Directives, Route}
 import akka.stream.ThrottleMode.Shaping
-import akka.stream.scaladsl.{ Flow, GraphDSL, Merge }
-import akka.stream.{ FlowShape, Graph, KillSwitches, SharedKillSwitch }
+import akka.stream.scaladsl.{Flow, GraphDSL, Merge}
+import akka.stream.{FlowShape, Graph, KillSwitches, OverflowStrategy, SharedKillSwitch}
 import akka.util.ByteString
 import cats.data.EitherT
 import cats.implicits._
 import com.pennsieve.models.Channel
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query._
-import com.pennsieve.streaming.server.StreamUtils.{ splitMerge, EitherOptionFilter }
+import com.pennsieve.streaming.server.StreamUtils.{EitherOptionFilter, splitMerge}
 import com.pennsieve.streaming.server.TSJsonSupport._
-import com.pennsieve.streaming.server.TimeSeriesFlow.{
-  SessionFilters,
-  SessionKillSwitches,
-  SessionMontage,
-  WithError
-}
-import com.pennsieve.streaming.{ RangeLookUp, TimeSeriesMessage, UnitRangeLookUp }
+import com.pennsieve.streaming.server.TimeSeriesFlow.{SessionFilters, SessionKillSwitches, SessionMontage, WithError}
+import com.pennsieve.streaming.{RangeLookUp, TimeSeriesMessage, UnitRangeLookUp}
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 import spray.json._
@@ -46,8 +41,8 @@ import uk.me.berndporr.iirj.Butterworth
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Success, Try }
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 /**
   * Created by jsnavely on 2/7/17.
@@ -118,6 +113,8 @@ class TimeSeriesFlow(
   val throttlePeriod = config.getInt("timeseries.throttle.period")
 
   val inactiveTimeout = config.getDuration("timeseries.idle-timeout")
+
+  val maxMessageQueue = config.getInt("max-message-queue-ts-query")
 
   var lastActive = System.currentTimeMillis()
 
@@ -421,68 +418,7 @@ class TimeSeriesFlow(
           )
       }
       .via(EitherOptionFilter)
-      .conflateWithSeed(identity) { (previous, current) =>
-        // Always keep the current (latest) message
-        current
-      }
-
-//  def parseFlow: Flow[Message, WithError[Respondable], NotUsed] =
-//    Flow[Message]
-//      .throttle(throttleItems, throttlePeriod.second, throttleItems, Shaping)
-//      .via(killswitch.flow)
-//      .keepAlive(15.seconds, () => TextMessage.Strict(new KeepAlive().toJson.toString))
-//      .mapAsync(1) {
-//        case textMessage: TextMessage =>
-//          textMessage.toStrict(10 seconds).map { message =>
-//            val timeSeriesRequest = Try(message.text.parseJson.convertTo[TimeSeriesRequest])
-//            val montageRequest = Try(message.text.parseJson.convertTo[MontageRequest])
-//
-//            // if we didn't get respondable request, attempt to parse
-//            // all other options
-//            if (timeSeriesRequest.isSuccess || montageRequest.isSuccess) {
-//              lastActive = System.currentTimeMillis() //only valid requests for data keep the flow alive
-//              // Explicitly handle each type to ensure proper Respondable casting
-//              timeSeriesRequest match {
-//                case Success(tsr) => Right(Some(tsr: Respondable))
-//                case Failure(_) =>
-//                  montageRequest match {
-//                    case Success(mr) => Right(Some(mr: Respondable))
-//                    case Failure(_) =>
-//                      Right(None) // This shouldn't happen given the outer condition
-//                  }
-//              }
-//            } else {
-//              // if we didn't get respondable request, attempt to parse all other options
-//              perform(message.text) match {
-//                case Success(_) => Right(None)
-//                case Failure(_) =>
-//                  Left(
-//                    TimeSeriesException
-//                      .UnexpectedError(s"unsupported message received: $message")
-//                  )
-//              }
-//            }
-//          }
-//        case _: BinaryMessage =>
-//          Future.successful(
-//            Left(
-//              TimeSeriesException
-//                .UnexpectedError("recieved unexpected binary message")
-//            )
-//          )
-//      }
-//      .via(EitherOptionFilter)
-//      .conflateWithSeed(identity) { (previous, current) =>
-//        current match {
-//          case Right(Some(_)) =>
-//            // Since all Some(_) values here should be Respondable types (TimeSeriesRequest or MontageRequest),
-//            // we can simply keep the latest one
-//            log.noContext.debug("Discarding previous Respondable message due to newer one")
-//            current // Keep the newer Respondable, discard the previous
-//          case _ =>
-//            previous // Keep non-Respondable messages (like None from filters/keepalives)
-//        }
-//      }
+      .buffer(maxMessageQueue, OverflowStrategy.dropHead)
 
   val dualQueryExecutor
     : Graph[FlowShape[TimeSeriesRequest, WithError[TimeSeriesMessage]], NotUsed] =
