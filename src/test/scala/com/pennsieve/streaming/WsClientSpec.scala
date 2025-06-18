@@ -79,6 +79,7 @@ class WsClientSpec
       .withValue("timeseries.s3-host", ConfigValueFactory.fromAnyRef("localhost"))
       .withValue("timeseries.s3-port", ConfigValueFactory.fromAnyRef(port))
       .withValue("timeseries.request-queue-size", ConfigValueFactory.fromAnyRef(10))
+      .withValue("timeseries.max-message-queue", ConfigValueFactory.fromAnyRef(3))
     wsClient = new S3WsClient(fakeConfig)
   }
 
