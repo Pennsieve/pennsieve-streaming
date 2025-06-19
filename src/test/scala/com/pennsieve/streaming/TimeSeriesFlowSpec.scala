@@ -33,9 +33,11 @@ import com.pennsieve.streaming.server.TimeSeriesFlow.{
 }
 import com.pennsieve.streaming.server._
 import org.scalatest.{ Inspectors, Matchers }
+import org.scalatest.concurrent.ScalaFutures
+
 import org.scalatest.fixture.FlatSpec
 import spray.json._
-import uk.me.berndporr.iirj.{ Butterworth, Cascade }
+import uk.me.berndporr.iirj.{ Butterworth }
 
 import scala.collection.JavaConverters._
 import scala.collection.{ concurrent, immutable }
@@ -49,7 +51,8 @@ class TimeSeriesFlowSpec
     with AkkaImplicits
     with TestConfig
     with TestDatabase
-    with SessionGenerator {
+    with SessionGenerator
+    with ScalaFutures {
 
   implicit val log = new ContextLogger()
   implicit val wsClient = new LocalFilesystemWsClient
@@ -120,6 +123,69 @@ class TimeSeriesFlowSpec
     assert(page2.segment.get.channelName == channelName)
     assert(page2.segment.get.data.length == 200)
     assert(page2.segment.get.nrPoints == 200)
+  }
+
+  "aborting message" should "prevent previous messages from being handled" in {
+    implicit dbSession =>
+      val channelId = ports.GenericIds.head
+      val channelName = ports.GenericNames.head
+      val session = getRandomSession()
+
+      // requests for two adjacent pages
+      val request = TextMessage(
+        TimeSeriesRequest(
+          packageId = ports.GenericPackage,
+          virtualChannels = Some(List(VirtualChannel(id = channelId, name = channelName))),
+          startTime = 200000000,
+          endTime = 600000000,
+          pixelWidth = 0
+        ).toJson.toString
+      )
+
+      // requests for two adjacent pages
+      val abortRequest = TextMessage(DumpBufferRequest().toJson.toString)
+
+//    val requestSource = (1 to 100).map(_ => request).toList
+      val requestSource = List(request, request, abortRequest)
+
+      val tsFlow = new TimeSeriesFlow(
+        session,
+        sessionFilters,
+        montage,
+        sessionKillSwitches,
+        channelMap = ports
+          .packageMap(ports.GenericPackage)
+          .map(chan => chan.nodeId -> chan)
+          .toMap,
+        rangeLookUp,
+        unitRangeLookUp
+      )
+
+      val runfuture =
+        Source[Message](requestSource)
+          .via(tsFlow.flowGraph)
+          .concat(Source.empty.delay(200.milliseconds))
+          .runWith(Sink.seq)
+
+      whenReady(runfuture, timeout(5.seconds)) { messages =>
+        // Parse the messages to understand what we received
+        val textMessages = messages.collect { case tm: TextMessage => tm }
+        val binaryMessages = messages.collect { case bm: BinaryMessage => bm }
+
+        // When a dump buffer request is processed, we should get:
+        // 1. A BufferDumpedResponse (as TextMessage)
+        // 2. NO TimeSeriesMessage responses (as BinaryMessage) for the original request
+
+        println(s"Total messages received: ${messages.length}")
+        println(s"Text messages: ${textMessages.length}")
+        println(s"Binary messages: ${binaryMessages.length}")
+
+        textMessages.length shouldBe 0
+
+        binaryMessages.length shouldBe 0
+
+      }
+
   }
 
   "channel filters" should "be applied to the stream" in { implicit dbSession =>

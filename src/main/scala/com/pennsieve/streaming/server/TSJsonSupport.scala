@@ -241,6 +241,7 @@ final case class ClearFilterRequest(channelFiltersToClear: List[String])
 final case class ResetFilterRequest(channelFiltersToReset: List[String])
 final case class KeepAlive(currentTime: Long = System.currentTimeMillis())
 final case class HealthCheck(connections: Long, age: Long, currentTime: Long)
+final case class DumpBufferRequest(requestType: String = "DumpBufferRequest") extends Respondable
 
 trait TSJsonSupport extends SprayJsonSupport with DefaultJsonProtocol
 object TSJsonSupport {
@@ -311,5 +312,6 @@ object TSJsonSupport {
   implicit val ClearFilterRequestFormat = jsonFormat1(ClearFilterRequest)
   implicit val ResetFilterRequestFormat = jsonFormat1(ResetFilterRequest)
   implicit val lookupResultRowFormat = jsonFormat6(LookupResultRow)
+  implicit val dumpBufferRequestFormat = jsonFormat1(DumpBufferRequest)
   implicit val health = jsonFormat3(HealthCheck)
 }
