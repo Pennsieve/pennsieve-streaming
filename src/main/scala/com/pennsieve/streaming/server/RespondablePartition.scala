@@ -16,7 +16,7 @@
 
 package com.pennsieve.streaming.server
 
-import akka.stream.stage.{ GraphStage, GraphStageLogic }
+import akka.stream.stage.{ GraphStage, GraphStageLogic, InHandler, OutHandler }
 import akka.stream._
 import com.pennsieve.streaming.server.TimeSeriesFlow.WithError
 
@@ -43,27 +43,35 @@ class RespondablePartition
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) {
 
-      private def bothAvailable: Boolean =
-        isAvailable(montageRequestOut) && isAvailable(timeSeriesRequestOut)
-
-      private def attemptPull(): Unit = {
-        if (bothAvailable && isAvailable(in)) grabAndPush()
-        else if (bothAvailable && !hasBeenPulled(in)) pull(in)
-      }
-
-      private def grabAndPush(): Unit =
-        grab(in) match {
-          case Right(mr: MontageRequest) => push(montageRequestOut, mr)
-          case Right(tsr: TimeSeriesRequest) => push(timeSeriesRequestOut, tsr)
-          case Left(tse: TimeSeriesException) => push(errorsOut, tse)
+      setHandler(
+        in,
+        new InHandler {
+          override def onPush(): Unit = {
+            grab(in) match {
+              case Left(error) =>
+                push(errorsOut, error)
+              case Right(_: DumpBufferRequest) =>
+                // DumpBufferRequest has already done its work in conflation - just consume and continue
+                pull(in)
+              case Right(montageRequest: MontageRequest) =>
+                push(montageRequestOut, montageRequest)
+              case Right(timeSeriesRequest: TimeSeriesRequest) =>
+                push(timeSeriesRequestOut, timeSeriesRequest)
+            }
+          }
         }
+      )
 
-      setHandler(in = in, handler = () => {
-        if (bothAvailable) grabAndPush()
+      setHandler(errorsOut, new OutHandler {
+        override def onPull(): Unit = if (!hasBeenPulled(in)) pull(in)
       })
 
-      setHandler(out = montageRequestOut, handler = () => attemptPull())
-      setHandler(out = timeSeriesRequestOut, handler = () => attemptPull())
-      setHandler(out = errorsOut, handler = () => attemptPull())
+      setHandler(montageRequestOut, new OutHandler {
+        override def onPull(): Unit = if (!hasBeenPulled(in)) pull(in)
+      })
+
+      setHandler(timeSeriesRequestOut, new OutHandler {
+        override def onPull(): Unit = if (!hasBeenPulled(in)) pull(in)
+      })
     }
 }
