@@ -243,6 +243,7 @@ final case class ResetFilterRequest(channelFiltersToReset: List[String])
 final case class KeepAlive(currentTime: Long = System.currentTimeMillis())
 final case class HealthCheck(connections: Long, age: Long, currentTime: Long)
 final case class DumpBufferRequest(requestType: String = "DumpBufferRequest") extends Respondable
+case class TimestampedRequest(original: Respondable, timestamp: Long) extends Respondable
 
 trait TSJsonSupport extends SprayJsonSupport with DefaultJsonProtocol
 object TSJsonSupport {
