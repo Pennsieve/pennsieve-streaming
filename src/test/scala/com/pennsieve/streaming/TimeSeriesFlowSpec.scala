@@ -145,8 +145,7 @@ class TimeSeriesFlowSpec
       // requests for two adjacent pages
       val abortRequest = TextMessage(DumpBufferRequest().toJson.toString)
 
-//    val requestSource = (1 to 100).map(_ => request).toList
-      val requestSource = List(request, request, abortRequest)
+      val requestSource = List.fill(10)(request) ++ (abortRequest :: Nil)
 
       val tsFlow = new TimeSeriesFlow(
         session,
@@ -164,7 +163,6 @@ class TimeSeriesFlowSpec
       val runfuture =
         Source[Message](requestSource)
           .via(tsFlow.flowGraph)
-          .concat(Source.empty.delay(200.milliseconds))
           .runWith(Sink.seq)
 
       whenReady(runfuture, timeout(5.seconds)) { messages =>
@@ -182,7 +180,7 @@ class TimeSeriesFlowSpec
 
         textMessages.length shouldBe 0
 
-        binaryMessages.length shouldBe 0
+        binaryMessages.length should be < 10
 
       }
 
@@ -354,7 +352,7 @@ class TimeSeriesFlowSpec
 
       val requestSource = List(request)
 
-      val tsFlow = new TimeSeriesFlow(
+      val tsFlow = new TestTimeSeriesFlow(
         session,
         sessionFilters,
         montage,

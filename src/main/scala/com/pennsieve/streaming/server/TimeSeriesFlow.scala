@@ -18,73 +18,35 @@ package com.pennsieve.streaming.server
 
 import java.util.concurrent.ConcurrentHashMap
 import akka.NotUsed
+import akka.stream.scaladsl.GraphDSL.Implicits._
+
+import scala.concurrent.duration._
 import akka.actor.ActorSystem
-import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
-import akka.http.scaladsl.server.{ Directives, Route }
+import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
+import akka.http.scaladsl.server.{Directives, Route}
 import akka.stream.ThrottleMode.Shaping
-import akka.stream.scaladsl.{ Flow, GraphDSL, Merge }
-import akka.stream.{ FlowShape, Graph, KillSwitches, OverflowStrategy, SharedKillSwitch }
+import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, Partition}
+import akka.stream.{FlowShape, Graph, KillSwitches, SharedKillSwitch}
 import akka.util.ByteString
 import cats.data.EitherT
 import cats.implicits._
+
+import java.util.concurrent.atomic.AtomicLong
 import com.pennsieve.models.Channel
 import com.pennsieve.service.utilities.ContextLogger
 import com.pennsieve.streaming.query._
-import com.pennsieve.streaming.server.StreamUtils.{ splitMerge, EitherOptionFilter }
+import com.pennsieve.streaming.server.StreamUtils.{EitherOptionFilter, splitMerge}
 import com.pennsieve.streaming.server.TSJsonSupport._
-import com.pennsieve.streaming.server.TimeSeriesFlow.{
-  SessionFilters,
-  SessionKillSwitches,
-  SessionMontage,
-  WithError
-}
-import com.pennsieve.streaming.{ RangeLookUp, TimeSeriesMessage, UnitRangeLookUp }
-import akka.stream.stage.{
-  GraphStage,
-  GraphStageLogic,
-  InHandler,
-  OutHandler,
-  TimerGraphStageLogic
-}
-import akka.stream.{ Attributes, FlowShape, Inlet, Outlet }
+import com.pennsieve.streaming.server.TimeSeriesFlow.{SessionFilters, SessionKillSwitches, SessionMontage, WithError}
+import com.pennsieve.streaming.{RangeLookUp, TimeSeriesMessage, UnitRangeLookUp}
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
 import spray.json._
 import uk.me.berndporr.iirj.Butterworth
 
 import scala.collection.JavaConverters._
-import scala.concurrent.duration._
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Success, Try }
-
-case class DualLaneBuffer(
-  normalMessages: Vector[WithError[Respondable]] = Vector.empty,
-  shouldDump: Boolean = false,
-  maxNormalSize: Int
-) {
-
-  def addMessage(message: WithError[Respondable])(implicit log: ContextLogger): DualLaneBuffer = {
-    // All messages go to normal lane now
-    val updated = normalMessages :+ message
-    if (updated.size > maxNormalSize) {
-      val messagesToKeep = updated.takeRight(maxNormalSize)
-      log.noContext.debug(s"Buffer overflow: keeping latest ${messagesToKeep.size} messages")
-      this.copy(normalMessages = messagesToKeep)
-    } else {
-      this.copy(normalMessages = updated)
-    }
-  }
-
-  def setDumpRequested(): DualLaneBuffer = {
-    this.copy(shouldDump = true)
-  }
-
-  def getAllMessagesForProcessing: Vector[WithError[Respondable]] = {
-    // Return all buffered messages for normal processing
-    normalMessages
-  }
-
-}
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 /**
   * Created by jsnavely on 2/7/17.
@@ -101,7 +63,7 @@ object TimeSeriesFlow extends Directives with TSJsonSupport {
   type SessionKillSwitches =
     scala.collection.concurrent.Map[String, scala.collection.concurrent.Map[Long, SharedKillSwitch]]
 
-//  type flowId = Long
+  //  type flowId = Long
 
   type WithError[B] = Either[TimeSeriesException, B]
   type WithErrorT[B] = EitherT[Future, TimeSeriesException, B]
@@ -125,6 +87,7 @@ object TimeSeriesFlow extends Directives with TSJsonSupport {
     }
 
 }
+
 class TimeSeriesFlow(
   session: String,
   sessionFilters: SessionFilters,
@@ -150,7 +113,6 @@ class TimeSeriesFlow(
   val throttleItems = config.getInt("timeseries.throttle.items")
   val throttlePeriod = config.getInt("timeseries.throttle.period")
   val inactiveTimeout = config.getDuration("timeseries.idle-timeout")
-  val maxMessageQueue = config.getInt("timeseries.max-message-queue")
   var lastActive = System.currentTimeMillis()
 
   // Session state management
@@ -164,50 +126,85 @@ class TimeSeriesFlow(
   val killswitch = KillSwitches.shared(session)
   killSwitches.put(flowId, killswitch)
 
-  @volatile var pendingBufferDump: Boolean = false
+  // Atomic flags for thread-safe coordination
+  private val lastAbortTime = new AtomicLong(-1L)
 
-  val unitDataMultiFlow: Flow[TimeSeriesRequest, WithError[UnitRangeRequest], NotUsed] =
-    Flow[TimeSeriesRequest]
-      .map(
-        tsr =>
-          tsr.channelIds.flatMap { channelIds =>
-            val missingChannels = channelIds.toSet -- channelMap.keySet
-            if (missingChannels.isEmpty)
-              Right(
-                channelIds
-                  .map(channelMap)
-                  .flatMap(tsr.toUnitRangeRequests(unitRangeLookUp))
-              )
-            else
-              Left(
-                TimeSeriesException
-                  .PackageMissingChannels(missingChannels.toList, tsr.packageId)
-              )
-          }
-      )
+  // Helper to check if a message timestamp is still valid (after last abort)
+  private def isValidMessage(messageTime: Long, message: String): Boolean = {
+    val abortTime = lastAbortTime.get()
 
-      // flatten this stream of lists
+    log.noContext.debug(s"From $message}")
+    if (abortTime == -1L || messageTime == 0L) {
+      // No abort has happened yet OR no timestamp available - allow all messages
+      log.noContext.debug(s"DEBUG: Allowing message - has_abortTime=${abortTime != -1L}, has_messageTime=${messageTime != 0L}")
+
+      true
+    } else {
+      val isValid = messageTime > abortTime
+      if (isValid) {
+        log.noContext.debug(s"DEBUG: PASS Message validation - $messageTime > $abortTime = $isValid")
+      } else {
+        log.noContext.debug(s"DEBUG: BLOCK Message validation - $messageTime > $abortTime = $isValid")
+      }
+
+      messageTime > abortTime
+    }
+  }
+
+  val unitDataMultiFlow: Flow[WithError[Respondable], WithError[(UnitRangeRequest, Long)], NotUsed] =
+    Flow[WithError[Respondable]]
+      .collect {
+        case Right(TimestampedRequest(tsr: TimeSeriesRequest, timestamp)) => (tsr, timestamp)
+      }
+      .filter { case (_, timestamp) =>
+        if (!isValidMessage(timestamp, "unitDataMultiFlow")) {
+          log.noContext.debug("Filtering out unit data request due to abort")
+          false
+        } else {
+          true
+        }
+      }
+      .map { case (tsr, timestamp) =>
+        tsr.channelIds.flatMap { channelIds =>
+          val missingChannels = channelIds.toSet -- channelMap.keySet
+          if (missingChannels.isEmpty)
+            Right(
+              channelIds
+                .map(channelMap)
+                .flatMap(tsr.toUnitRangeRequests(unitRangeLookUp))
+                .map(request => (request, timestamp))
+            )
+          else
+            Left(
+              TimeSeriesException
+                .PackageMissingChannels(missingChannels.toList, tsr.packageId)
+            )
+        }
+      }
       .mapConcat(_.fold(e => List(Left(e)), requests => requests.map(Right(_))))
 
-  val timeSeriesMultiFlow
-    : Flow[TimeSeriesRequest, WithError[(RangeRequest, Option[RangeRequest])], NotUsed] =
-    Flow[TimeSeriesRequest]
-      .map { tsr =>
+  val timeSeriesMultiFlow: Flow[WithError[Respondable], WithError[((RangeRequest, Option[RangeRequest]), Long)], NotUsed] =
+    Flow[WithError[Respondable]]
+      .collect {
+        case Right(TimestampedRequest(tsr: TimeSeriesRequest, timestamp)) => (tsr, timestamp)
+      }
+      .filter { case (_, timestamp) =>
+        if (!isValidMessage(timestamp, "timeseriesFlow")) {
+          log.noContext.debug("Filtering out time series request due to abort")
+          false
+        } else {
+          true
+        }
+      }
+      .map { case (tsr, timestamp) =>
         for {
           virtualChannels <- tsr.getVirtualChannels(channelMap)
-
-          // build the montage pairs for this set of channels based
-          // on the current montage
           montagedChannels <- Montage.buildMontage(
             packageMontages,
             tsr.packageId,
             channelMap,
             virtualChannels
           )
-
-          // align the lead and secondary channel requests in order
-          // to ensure we are montaging the correct data between the
-          // channels
           alignedRequests <- montagedChannels.flatMap {
             case (leadChannel, maybeSecondaryChannel) => {
               val leadChannelRequests =
@@ -216,9 +213,6 @@ class TimeSeriesFlow(
               maybeSecondaryChannel
                 .map(tsr.toContinuousRangeRequests(rangeLookup)) match {
                 case Some(secondaryChannelRequests) => {
-
-                  // If the amount of requests differs between the lead/secondary
-                  // channel for this montage, the data is misaligned
                   if (leadChannelRequests.length != secondaryChannelRequests.length)
                     List(
                       Left(
@@ -226,72 +220,140 @@ class TimeSeriesFlow(
                           .MontageMisalignment(leadChannel.nodeId, maybeSecondaryChannel.get.nodeId)
                       )
                     )
-
-                  // Otherwise zip the requests together to align them
                   else
                     leadChannelRequests
                       .sortBy(_.sequenceId)
                       .zip(secondaryChannelRequests.sortBy(_.sequenceId))
                       .map {
                         case (l, s) =>
-                          Right(l -> (Some(s)))
+                          Right(((l, Some(s)), timestamp))
                       }
                 }
                 case None =>
-                  leadChannelRequests.map(r => Right(r -> None))
+                  leadChannelRequests.map(r => Right(((r, None), timestamp)))
               }
             }
           }.sequence
         } yield alignedRequests
       }
-
-      // flatten out this stream of lists
       .mapConcat(_.fold(e => List(Left(e)), requests => requests.map(Right(_))))
 
   val queryUnitHttpS3ExecFlow
-    : Flow[WithError[UnitRangeRequest], WithError[TimeSeriesMessage], NotUsed] =
-    Flow[WithError[UnitRangeRequest]]
-      .filter(_.fold(_ => true, rr => channelTypeMatch(rr.channel, "unit", channelMap)))
+  : Flow[WithError[(UnitRangeRequest, Long)], WithError[(TimeSeriesMessage, Long)], NotUsed] =
+    Flow[WithError[(UnitRangeRequest, Long)]]
+      .filter(_.fold(_ => true, { case (rr, _) => channelTypeMatch(rr.channel, "unit", channelMap) }))
       .mapAsyncUnordered(parallelism) {
-        _.fold(
-          e => Future.successful(Left(e)),
-          rr => unitQueryExecutor.rangeQuery(rr).map(Right.apply)
-        )
+        case Left(error) => Future.successful(Some(Left(error)))
+        case Right((request, messageTime)) =>
+          if (!isValidMessage(messageTime, "queryUnitHttpS3ExecFlow")) {
+            log.noContext.debug(s"ABORT: Dropping unit query with timestamp $messageTime")
+            Future.successful(None)
+          } else {
+            processUnitRequest(Right(request), messageTime).map {
+              case Some(Right(message)) => Some(Right((message, messageTime)))
+              case Some(Left(error)) => Some(Left(error))
+              case None => None
+            }
+          }
       }
+      .collect { case Some(result) => result }
+
+
+  // Helper method for unit requests
+  protected def processUnitRequest(
+                                  request: WithError[UnitRangeRequest], // Remove the tuple, just pass the request
+                                  messageTime: Long
+                                ): Future[Option[WithError[TimeSeriesMessage]]] = {
+    request.fold(
+      e => Future.successful(Some(Left(e))),
+      rr => {
+        val queryFuture = unitQueryExecutor.rangeQuery(rr)
+        queryFuture
+          .map { result =>
+            Some(Right(result))
+          }
+          .recover {
+            case ex =>
+              Some(Left(TimeSeriesException.UnexpectedError(ex.getMessage)))
+          }
+      }
+    )
+  }
 
   val queryHttpS3ExecFlow
-    : Flow[WithError[(RangeRequest, Option[RangeRequest])], WithError[TimeSeriesMessage], NotUsed] =
-    Flow[WithError[(RangeRequest, Option[RangeRequest])]]
-      .filter(
-        _.fold(
-          _ => true,
-          channels => {
-            (channels._1.channelNodeId :: channels._2
-              .map(_.channelNodeId)
-              .toList)
-              .forall(channel => channelTypeMatch(channel, "continuous", channelMap))
-          }
-        )
-      )
+  : Flow[WithError[((RangeRequest, Option[RangeRequest]), Long)], WithError[(TimeSeriesMessage, Long)], NotUsed] =
+    Flow[WithError[((RangeRequest, Option[RangeRequest]), Long)]]
+      .filter(_.fold(_ => true, { case (channels, _) =>
+        val allChannelIds = channels._1.channelNodeId :: channels._2.map(_.channelNodeId).toList
+        allChannelIds.forall(channel => channelTypeMatch(channel, "continuous", channelMap))
+      }))
       .mapAsyncUnordered(parallelism) {
-        _.fold(
-          e => Future.successful(Left(e)), {
-            case (leadChannel, secondaryChannel) =>
-              continuousQueryExecutor
-                .rangeQuery(leadChannel, channelFilters, secondaryChannel)
-                .map(Right.apply)
+        case Left(error) => Future.successful(Some(Left(error)))
+        case Right((channels, messageTime)) =>
+          if (!isValidMessage(messageTime, "queryHttpS3ExecFlow")) {
+            log.noContext.debug(s"ABORT: Dropping query with timestamp $messageTime")
+            Future.successful(None)
+          } else {
+            processRequest(Right(channels), messageTime).map {
+              case Some(Right(message)) => Some(Right((message, messageTime)))
+              case Some(Left(error)) => Some(Left(error))
+              case None => None
+            }
           }
-        )
       }
+      .collect { case Some(result) => result }
 
-  val dualQueryExecutor
-    : Graph[FlowShape[TimeSeriesRequest, WithError[TimeSeriesMessage]], NotUsed] =
-    splitMerge(
-      unitDataMultiFlow
-        .via(queryUnitHttpS3ExecFlow),
-      timeSeriesMultiFlow
-        .via(queryHttpS3ExecFlow)
+  // Helper method to avoid complex nesting
+  protected def processRequest(
+                              request: WithError[(RangeRequest, Option[RangeRequest])], // Remove tuple wrapping
+                              messageTime: Long
+                            ): Future[Option[WithError[TimeSeriesMessage]]] = {
+    request.fold(
+      e => Future.successful(Some(Left(e))), {
+        case (leadChannel, secondaryChannel) =>
+          val queryFuture =
+            continuousQueryExecutor.rangeQuery(leadChannel, channelFilters, secondaryChannel)
+
+          queryFuture
+            .map { result =>
+              Some(Right(result))
+            }
+            .recover {
+              case ex =>
+                Some(Left(TimeSeriesException.UnexpectedError(ex.getMessage)))
+            }
+      }
     )
+  }
+
+
+  val dualQueryExecutor: Graph[FlowShape[WithError[Respondable], WithError[(TimeSeriesMessage, Long)]], NotUsed] =
+    GraphDSL.create() { implicit builder =>
+      import GraphDSL.Implicits._
+
+      val partition = builder.add(
+        Partition[WithError[Respondable]](2, {
+          case Right(TimestampedRequest(tsr: TimeSeriesRequest, _)) =>
+            val hasUnitChannels = tsr.channelIds.exists(channelIds =>
+              channelIds.exists(channelId => channelTypeMatch(channelId, "unit", channelMap))
+            )
+            if (hasUnitChannels) 0 else 1
+          case _ => 1
+        })
+      )
+
+      val merge = builder.add(Merge[WithError[(TimeSeriesMessage, Long)]](2))
+
+      val unitData = builder.add(unitDataMultiFlow)
+      val unitQuery = builder.add(queryUnitHttpS3ExecFlow)
+      val timeSeriesData = builder.add(timeSeriesMultiFlow)
+      val timeSeriesQuery = builder.add(queryHttpS3ExecFlow)
+
+      partition.out(0) ~> unitData ~> unitQuery ~> merge.in(0)      // Unit path
+      partition.out(1) ~> timeSeriesData ~> timeSeriesQuery ~> merge.in(1)  // Continuous path
+
+      FlowShape(partition.in, merge.out)
+    }
 
   val resetResponseTimestamps
     : Flow[WithError[TimeSeriesMessage], WithError[TimeSeriesMessage], NotUsed] =
@@ -322,8 +384,7 @@ class TimeSeriesFlow(
                   times = e.times
                     .grouped(2)
                     .flatMap {
-                      case Seq(time, count) =>
-                        Seq(time - packageMinimumTime, count)
+                      case Seq(time, count) => Seq(time - packageMinimumTime, count)
                     }
                     .toSeq
                 )
@@ -333,7 +394,6 @@ class TimeSeriesFlow(
             totalResponses,
             responseSequenceId
           )
-
         case passthrough => passthrough
       })
 
@@ -435,6 +495,7 @@ class TimeSeriesFlow(
       }
       .map(_.fold(e => TextMessage(e.json), is => TextMessage(is.toJson.toString)))
 
+
   def numberSequentially[T](ls: Seq[T])(numberit: ((T, Int)) => T): Seq[T] =
     ls.zipWithIndex.map(numberit)
 
@@ -453,12 +514,6 @@ class TimeSeriesFlow(
       Try(msg.parseJson.convertTo[ResetFilterRequest])
         .map(resetFilters _) orElse
       Try(msg.parseJson.convertTo[KeepAlive]).map(killInactive _)
-  }
-
-  def dumpBuffer(req: DumpBufferRequest): Boolean = {
-    log.noContext.info(s"Buffer dump requested: $req")
-    pendingBufferDump = true
-    true // Return success like other handlers
   }
 
   def buildFilters(req: FilterRequest): Boolean = {
@@ -550,110 +605,7 @@ class TimeSeriesFlow(
     }
   }
 
-  class BufferWithGlobalDumpStage(
-    maxSize: Int,
-    flushTimeout: FiniteDuration
-  )(implicit
-    log: ContextLogger
-  ) extends GraphStage[FlowShape[WithError[Respondable], WithError[Respondable]]] {
-
-    val in = Inlet[WithError[Respondable]]("BufferDump.in")
-    val out = Outlet[WithError[Respondable]]("BufferDump.out")
-    override val shape = FlowShape(in, out)
-
-    override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
-      new TimerGraphStageLogic(shape) {
-
-        private var pendingBuffer = Vector.empty[WithError[Respondable]]
-        private val FlushTimer = "flush"
-
-        override def preStart(): Unit = {
-          scheduleOnce(FlushTimer, flushTimeout)
-        }
-
-        setHandler(
-          in,
-          new InHandler {
-            override def onPush(): Unit = {
-              grab(in) match {
-                case Right(_: DumpBufferRequest) =>
-                  log.noContext.info(
-                    s"Global dump request - discarding ${pendingBuffer.size} pending messages"
-                  )
-                  pendingBuffer = Vector.empty // GLOBAL DUMP - clears ALL pending messages
-                  safePullIfNeeded() // Consume the dump request and continue
-
-                case message =>
-                  pendingBuffer = pendingBuffer :+ message
-
-                  // Flush if buffer is full
-                  if (pendingBuffer.size >= maxSize) {
-                    flushBuffer()
-                  } else {
-                    pull(in)
-                  }
-              }
-            }
-
-            override def onUpstreamFinish(): Unit = {
-              log.noContext.info(
-                s"Upstream finished - flushing ${pendingBuffer.size} remaining messages"
-              )
-              // Cancel timer to prevent future attempts to pull
-              cancelTimer(FlushTimer)
-
-              // Emit any remaining messages
-              if (pendingBuffer.nonEmpty) {
-                emitMultiple(out, pendingBuffer)
-                pendingBuffer = Vector.empty
-              }
-
-              // Complete the stage
-              completeStage()
-            }
-
-            override def onUpstreamFailure(ex: Throwable): Unit = {
-              cancelTimer(FlushTimer)
-              failStage(ex)
-            }
-
-          }
-        )
-
-        setHandler(out, new OutHandler {
-          override def onPull(): Unit = {
-            if (!hasBeenPulled(in)) pull(in)
-          }
-        })
-
-        override protected def onTimer(timerKey: Any): Unit = {
-          if (timerKey == FlushTimer) {
-            // Only flush if upstream is still active
-            if (!isClosed(in)) {
-              flushBuffer()
-              // Reschedule only if upstream is still active
-              scheduleOnce(FlushTimer, flushTimeout)
-            }
-          }
-        }
-
-        private def flushBuffer(): Unit = {
-          if (pendingBuffer.nonEmpty) {
-            log.noContext.debug(s"Timer flush: sending ${pendingBuffer.size} messages downstream")
-            emitMultiple(out, pendingBuffer)
-            pendingBuffer = Vector.empty
-          }
-          safePullIfNeeded()
-        }
-
-        private def safePullIfNeeded(): Unit = {
-          if (!hasBeenPulled(in) && !isClosed(in) && isAvailable(out)) {
-            pull(in)
-          }
-        }
-      }
-  }
-
+  // UPDATED parseFlow with timestamp tagging
   def parseFlow: Flow[Message, WithError[Respondable], NotUsed] = {
     Flow[Message]
       .throttle(throttleItems, throttlePeriod.second, throttleItems, Shaping)
@@ -662,112 +614,171 @@ class TimeSeriesFlow(
       .mapAsync(1) {
         case textMessage: TextMessage =>
           textMessage.toStrict(10 seconds).map { message =>
+            val messageTimestamp = System.currentTimeMillis()
             val timeSeriesRequest = Try(message.text.parseJson.convertTo[TimeSeriesRequest])
             val montageRequest = Try(message.text.parseJson.convertTo[MontageRequest])
             val dumpBufferRequest = Try(message.text.parseJson.convertTo[DumpBufferRequest])
 
-            if (timeSeriesRequest.isSuccess) {
+            if (dumpBufferRequest.isSuccess) {
+
               lastActive = System.currentTimeMillis()
-              Right(Some(timeSeriesRequest.get: Respondable))
-            }
-            // Then MontageRequest
-            else if (montageRequest.isSuccess) {
+
+              // Record abort time - this invalidates ALL previous messages
+              val abortTime = System.currentTimeMillis()
+              lastAbortTime.set(abortTime)
+              log.noContext.info(s"ABORT: Invalidating all messages before timestamp $abortTime")
+
+              Right(None)
+
+            } else if (timeSeriesRequest.isSuccess) {
               lastActive = System.currentTimeMillis()
-              Right(Some(montageRequest.get: Respondable))
-            }
-            // Then DumpBufferRequest
-            else if (dumpBufferRequest.isSuccess) {
+
+              // Check if this message is still valid (after any abort)
+//              if (isValidMessage(messageTimestamp,"parseFlow")) {
+                // Store timestamp in thread-local for pipeline stages to check
+                val timestamped = TimestampedRequest(timeSeriesRequest.get, messageTimestamp)
+                Right(Some(timestamped: Respondable))
+//              } else {
+//                log.noContext
+//                  .debug(s"ABORT: Dropping TimeSeriesRequest with timestamp $messageTimestamp")
+//                Right(None)
+//              }
+
+            } else if (montageRequest.isSuccess) {
               lastActive = System.currentTimeMillis()
-              val dumpReq = dumpBufferRequest.get
-              log.noContext.info(s"Buffer dump requested: $dumpReq")
-              // DON'T set pendingBufferDump here - let the conflation handle it
-              Right(Some(dumpReq: Respondable))
+
+              // Check if this message is still valid (after any abort)
+//              if (isValidMessage(messageTimestamp,"parseFlow")) {
+                // Store timestamp in thread-local for pipeline stages to check
+                val timestamped = TimestampedRequest(montageRequest.get, messageTimestamp)
+                Right(Some(timestamped: Respondable))
+//              } else {
+//                log.noContext
+//                  .debug(s"ABORT: Dropping MontageRequest with timestamp $messageTimestamp")
+//                Right(None)
+//              }
 
             } else {
-              // if we didn't get respondable request, attempt to parse all other options
               perform(message.text) match {
                 case Success(_) => Right(None)
                 case Failure(_) =>
                   Left(
-                    TimeSeriesException
-                      .UnexpectedError(s"unsupported message received: $message")
+                    TimeSeriesException.UnexpectedError(s"unsupported message received: $message")
                   )
               }
             }
           }
         case _: BinaryMessage =>
           Future.successful(
-            Left(
-              TimeSeriesException
-                .UnexpectedError("received unexpected binary message")
-            )
+            Left(TimeSeriesException.UnexpectedError("received unexpected binary message"))
           )
       }
       .via(EitherOptionFilter)
-      .via(new BufferWithGlobalDumpStage(maxMessageQueue, 50.milliseconds))
   }
+
+  // Helper to extract timestamp from requests
+  private def extractTimestamp(request: WithError[Respondable]): Long = {
+    request match {
+      case Right(TimestampedRequest(_, timestamp)) =>
+        log.noContext.debug(s"DEBUG: Extracted timestamp $timestamp from TimestampedRequest")
+        if (timestamp == 0L) {
+          log.noContext.warn(s"DEBUG: Found 0L timestamp in TimestampedRequest!")
+        }
+        timestamp
+      case other =>
+        val currentTime = System.currentTimeMillis()
+        log.noContext.debug(s"DEBUG: Using current time $currentTime for non-TimestampedRequest: $other")
+        currentTime
+    }
+  }
+
+  private def extractOriginal(request: WithError[Respondable]): WithError[Respondable] = {
+    request match {
+      case Right(TimestampedRequest(original, _)) => Right(original)
+      case other => other
+    }
+  }
+
+//  object MessageTimestamp {
+//    private val timestamp = new ThreadLocal[Long]()
+//
+//    def set(time: Long): Unit = timestamp.set(time)
+//    def get(): Long = Option(timestamp.get()).getOrElse(0L)
+//    def clear(): Unit = timestamp.remove()
+//  }
 
   val resetRequestTimestamps: Flow[TimeSeriesRequest, TimeSeriesRequest, NotUsed] =
     Flow[TimeSeriesRequest]
-      .map {
-        case tsr if startAtEpoch =>
+      .map { tsr =>
+        if (startAtEpoch) {
           tsr.copy(
             startTime = packageMinimumTime + tsr.startTime,
             endTime = packageMinimumTime + tsr.endTime
           )
-        case passthrough => passthrough
+        } else {
+          tsr
+        }
       }
 
   val flowGraph: Graph[FlowShape[Message, Message], NotUsed] =
     GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits._
 
-      // attempt to parse all incoming binary websocket messages,
-      // modifying server state where necessary, and filtering out
-      // messages that won't requre a response
       val parser = builder.add(parseFlow)
+      val timestampProcessor = builder.add(
+        Flow[WithError[Respondable]]
+          .map { request =>
+            val timestamp = extractTimestamp(request)
+            if (isValidMessage(timestamp,"flowGraph")) {
+              request
+            } else {
+              log.noContext.debug(s"ABORT: Dropping request with timestamp $timestamp")
+              Left(TimeSeriesException.UnexpectedError("DROPPED_BY_ABORT"))
+            }
+          }
+          .filter {
+            case Left(TimeSeriesException.UnexpectedError("DROPPED_BY_ABORT", _)) => false
+            case _ => true
+          }
+      )
 
-      // dictate where to send different requests types
-      val respondablePartition = builder.add(new RespondablePartition)
-      val parseErrorsOut = respondablePartition.out0
-      val montageRequestOut = respondablePartition.out1
-      val timeSeriesRequestOut = respondablePartition.out2
+      // Add the missing broadcast
+      val broadcast = builder.add(Broadcast[WithError[Respondable]](2))
 
-      // reset all timestamps in the incoming TimeSeriesRequest
-      val requestTimestampResetter = builder.add(resetRequestTimestamps)
+      // Add the missing montageFlow
+      val montageFlow = builder.add(
+        Flow[WithError[Respondable]]
+          .collect { case Right(TimestampedRequest(mr: MontageRequest, _)) => mr }
+          .via(listMontageChannels)
+      )
 
-      // query for timeseries data and respond with a datastream given
-      // a timeseriers request
       val queryer = builder.add(dualQueryExecutor)
 
-      // reset all timestamps in the outgoing TimeSeriesMessage
+      val queryValidation = builder.add(
+        Flow[WithError[(TimeSeriesMessage, Long)]]
+          .filter {
+            case Right((_, messageTime)) =>
+              if (!isValidMessage(messageTime, "post-querier")) {
+                log.noContext.debug(s"ABORT: Dropping response with timestamp $messageTime")
+                false
+              } else {
+                true
+              }
+            case Left(_) => true
+          }
+          .map(_.map(_._1))
+      )
+
       val responseTimestampResetter = builder.add(resetResponseTimestamps)
-
-      // convert outgoing protobuf messages to akka messages that can
-      // be sent across the wire
       val wsMessageConverter = builder.add(toWsMessage)
+      val merge = builder.add(Merge[Message](2)) // Changed to 2 since you only have 2 inputs
 
-      // return a list of virtual channels associated with the given
-      // montage. this processor will return an error if the package
-      // is not eligible for the given montage.
-      val montageLister = builder.add(listMontageChannels)
-
-      // Convert parse errors to text messages
-      val errorConverter = builder.add(Flow[TimeSeriesException].map(e => TextMessage(e.json)))
-
-      // merge all responses back into a single outgoing flow
-      val merge = builder.add(Merge[Message](3))
-
-      // format: off
-      parser.out  ~>  respondablePartition.in
-
-      timeSeriesRequestOut ~> requestTimestampResetter ~> queryer ~> responseTimestampResetter ~> wsMessageConverter ~> merge
-      montageRequestOut ~> montageLister ~> merge
-      parseErrorsOut ~> errorConverter ~> merge
-      // format: on
+      // Connections
+      parser.out ~> timestampProcessor ~> broadcast.in
+      broadcast.out(0) ~> queryer ~> queryValidation ~> responseTimestampResetter ~> wsMessageConverter ~> merge.in(0)
+      broadcast.out(1) ~> montageFlow ~> merge.in(1)
 
       FlowShape(parser.in, merge.out)
-
     }
 
 }
