@@ -107,7 +107,7 @@ class BaseTimeSeriesQuery(
     val t0 = System.nanoTime()
     val result = block // call-by-name
     val t1 = System.nanoTime()
-    log.noContext.debug(s"task $name Elapsed time: " + (t1 - t0) + "ns")
+//    log.noContext.debug(s"task $name Elapsed time: " + (t1 - t0) + "ns")
     result
   }
 

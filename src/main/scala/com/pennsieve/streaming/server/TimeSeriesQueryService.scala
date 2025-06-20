@@ -31,7 +31,6 @@ import com.pennsieve.streaming.server.TimeSeriesFlow.{
 }
 import com.typesafe.config.Config
 import scalikejdbc.DBSession
-import uk.me.berndporr.iirj.Cascade
 import cats.instances.future._
 import com.pennsieve.streaming.{ RangeLookUp, UnitRangeLookUp }
 
