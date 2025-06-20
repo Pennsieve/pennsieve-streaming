@@ -145,8 +145,7 @@ class TimeSeriesFlowSpec
       // requests for two adjacent pages
       val abortRequest = TextMessage(DumpBufferRequest().toJson.toString)
 
-//    val requestSource = (1 to 100).map(_ => request).toList
-      val requestSource = List(request, request, abortRequest)
+      val requestSource = List(request, request, request, abortRequest, request)
 
       val tsFlow = new TimeSeriesFlow(
         session,
@@ -182,7 +181,8 @@ class TimeSeriesFlowSpec
 
         textMessages.length shouldBe 0
 
-        binaryMessages.length shouldBe 0
+        // Should only get the two messages after the abort message
+        binaryMessages.length shouldBe 2
 
       }
 

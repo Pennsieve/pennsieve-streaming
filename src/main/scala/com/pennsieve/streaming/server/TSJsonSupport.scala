@@ -90,7 +90,7 @@ final case class TimeSeriesRequest(
     * compatibility in case the front end is still using the old
     * request format.
     */
-  def getVirtualChannels(channelMap: Map[String, Channel]): WithError[List[VirtualChannel]] =
+  def getVirtualChannels(channelMap: Map[String, Channel]): WithError[List[VirtualChannel]] = {
     virtualChannels match {
       case Some(vc) => Right(vc)
       case None =>
@@ -100,6 +100,7 @@ final case class TimeSeriesRequest(
           case None => Left(TimeSeriesException.RequestMissingChannels)
         }
     }
+  }
 
   /** Enumerate the given list with the given `numberit` function */
   private def numberSequentially[T](ls: Seq[T])(numberit: ((T, Int)) => T): Seq[T] =
